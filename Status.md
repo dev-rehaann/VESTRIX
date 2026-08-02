@@ -1,8 +1,8 @@
 # Vestrix — Project Status
 
-_Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updated: July 24, 2026_
+_Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updated: August 2, 2026_
 
-> Note: project renamed from **Sentrix → Vestrix** after a trademark conflict was found with an active enterprise cybersecurity company (plus other naming collisions). Minor phonetic overlap with "Vectrix" (a cloud/SaaS security scanner) was reviewed and accepted as a low risk. Any references to "Sentrix" in older docs (roadmap, initialization guide) are historical and should be read as Vestrix going forward.
+> Note: project renamed from **Sentrix → Vestrix** after a trademark conflict was found with an active enterprise cybersecurity company (plus other naming collisions). Minor phonetic overlap with "Vectrix" (a cloud/SaaS security scanner) was reviewed and accepted as a low risk. Repository documentation now uses the Vestrix name.
 
 ---
 
@@ -37,6 +37,8 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 
 - Full promotional README section drafted: competitive gap table, text architecture diagram, component status table, quick-links placeholders
 - `docs/threat-model.md` generated (via Codex prompt) — currently mid-audit (see below)
+- `ml/benchmarks/BENCHMARKS.md` expanded into the append-only benchmark template for dataset provenance, leakage checks, per-class metrics, confusion matrices, cross-room/device evaluation, and unflattering results; no real benchmark run exists yet
+- Duplicate non-goals and initialization documents consolidated under `docs/`
 
 ---
 
@@ -80,7 +82,5 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 
 Full research context and detailed rationale live in:
 
-- `SENTRIX_Research_Roadmap.md` (prior-art analysis, standards alignment, rigor playbook)
-- `SENTRIX_PROJECT_INITIALIZATION.md` (full architecture/build reference, v0.1 → v1.0 roadmap)
-
-_(Titles retain the old "Sentrix" name from when they were written; content still applies to Vestrix.)_
+- [`docs/RESEARCH.md`](docs/RESEARCH.md) (prior-art analysis, standards alignment, rigor playbook)
+- [`docs/INITIALIZATION.md`](docs/INITIALIZATION.md) (full architecture/build reference, v0.1 → v1.0 roadmap)

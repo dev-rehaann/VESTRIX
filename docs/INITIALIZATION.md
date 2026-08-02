@@ -324,4 +324,4 @@ pip install numpy scipy pandas scikit-learn xgboost shap cryptography
 
 ---
 
-*Document history: v1 — 2026-07-08 — initial consolidated draft. Suggested home once the repo is live: `docs/INITIALIZATION.md` or the repo root.*
+*Document history: v1 — 2026-07-08 — initial consolidated draft. Canonical location: `docs/INITIALIZATION.md`.*
