@@ -37,6 +37,7 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 
 - Full promotional README section drafted: competitive gap table, text architecture diagram, component status table, quick-links placeholders
 - `docs/threat-model.md` ATT&CK/CAPEC mappings audited against MITRE's live catalogs; ICS-only mappings are explicitly conditional and the incorrect T1200 mapping was removed
+- `docs/DPIA.md` added as a GDPR Article 35-aligned operator template, with processing flows, risk assessment, implemented controls, known gaps, and controller responsibilities; deployment-specific completion remains the operator's responsibility
 - `ml/benchmarks/BENCHMARKS.md` expanded into the append-only benchmark template for dataset provenance, leakage checks, per-class metrics, confusion matrices, cross-room/device evaluation, and unflattering results; no real benchmark run exists yet
 - Duplicate non-goals and initialization documents consolidated under `docs/`
 
@@ -50,7 +51,7 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 |Leave-one-room-out / leave-one-device-out validation suite|Not started|Depends on firmware + real CSI data|
 |Multi-node zone fusion / localization|Not started (moonshot tier)|Depends on firmware + multiple nodes|
 |Labeled intrusion CSI dataset (Zenodo DOI)|Not started|Depends on firmware + collected data|
-|DPIA / Responsible Deployment doc|Not started|—|
+|Responsible Deployment guide|Not started|The DPIA template covers data-protection assessment, but broader deployment guidance remains separate work|
 |Awesome-list PRs|Not started|Highest-return near-term promotion action once repo is demo-ready|
 |Wazuh upstream community submission|Not started|Ruleset is tested and likely ready to submit|
 |arXiv preprint (hash-chain + SHAP evidentiary design)|Not started|Depends on v1.0-track milestones|
