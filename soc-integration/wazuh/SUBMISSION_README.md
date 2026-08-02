@@ -12,11 +12,14 @@ Vestrix reports classified security events such as a high-confidence physical
 intrusion or sensor tampering. It does not send raw CSI to Wazuh through this
 integration.
 
-The native Wazuh submission consists of:
+The live-tested source integration consists of:
 
 - `decoders/local_decoder.xml`: the `vestrix` JSON decoder;
 - `rules/local_rules.xml`: grouping, alerting, and correlation rules; and
 - the sample inputs and saved `wazuh-logtest` evidence under `sample_events/`.
+
+The upstream submission unit is the self-contained
+`upstream/vestrix_integration/` directory described below.
 
 The checked-in, live-tested XML contains one decoder named `vestrix`. The
 `vestrix_fields` name found in an earlier design document is not present in the
@@ -134,61 +137,56 @@ JSON extraction. The fix was verified in the live 4.14.5 manager, including a
 post-fix six-sample regression. The submission does not restore the earlier
 two-decoder design.
 
-## Upstream packaging requirements
+## Upstream submission package
 
-As of 2026-08-02, the former
-[`wazuh/wazuh-ruleset`](https://github.com/wazuh/wazuh-ruleset) repository is
-archived and directs ruleset contributions to
-[`wazuh/wazuh/ruleset`](https://github.com/wazuh/wazuh/tree/master/ruleset).
+The target is the `main` branch of
+[`wazuh/integrations`](https://github.com/wazuh/integrations). The complete
+local submission unit is `upstream/vestrix_integration/`; copy that directory
+to `integrations/vestrix_integration/` in a feature branch of a fork.
 
-The live repository was checked on 2026-08-02. Its `main` branch no longer has
-decoder, rule, or ruleset-test directories. The latest matching 4.14 branch,
-`4.14.8`, retained them at commit
-`f17b906579d1655b9a5093453c450eadf828f840`. At that commit the highest
-numbered decoder was `0580-macos_decoders.xml` and the highest numbered rule
-file was `0999-malicious-ioc-rules.xml`.
+```text
+vestrix_integration/
+├── README.md
+├── ruleset/
+│   ├── decoders/0585-vestrix_decoders.xml
+│   ├── rules/1000-vestrix_rules.xml
+│   └── testing/test.ini
+├── active_response/README.md
+├── sca/README.md
+├── threat_intel/README.md
+└── dashboards/README.md
+```
 
-Candidate copies are prepared as:
+The XML and test file are moved copies of the tested candidate. Active
+response, SCA, and threat-intelligence directories contain factual
+not-applicable notices; they do not contain placeholder implementations. The
+dashboard notice records a planned but unbuilt component.
 
-- `upstream/decoders/0585-vestrix_decoders.xml`;
-- `upstream/rules/1000-vestrix_rules.xml`; and
-- `test.ini`.
+The current Vestrix rule IDs `100200–100211` remain unchanged to preserve the
+tested candidate. They are inside Wazuh's
+[documented `100000–120000` local/custom range](https://documentation.wazuh.com/current/user-manual/ruleset/rules/custom.html)
+and require maintainer approval before upstream submission. If new IDs are
+assigned, update the rule XML and `ruleset/testing/test.ini` together.
 
-Their placement is conditional:
+## Contribution steps
 
-- **If submitting through a confirmed legacy ruleset PR:** place the decoder
-  at `ruleset/decoders/0585-vestrix_decoders.xml`, the rules at
-  `ruleset/rules/1000-vestrix_rules.xml`, and the test file at
-  `ruleset/testing/tests/vestrix.ini`, after rechecking filenames and IDs on
-  the target commit.
-- **If submitting through a confirmed Ruleset-as-Code or detection-engineering
-  workflow:** adapt these source artifacts to that repository's documented
-  structure and format. Do not assume it mirrors the legacy layout.
+1. Fork `wazuh/integrations` and create a feature branch from its current
+   `main` branch.
+2. Copy `upstream/vestrix_integration/` to
+   `integrations/vestrix_integration/` without changing the tested logic.
+3. Obtain maintainer approval for the rule-ID allocation and apply any ID
+   change to both the rules and tests.
+4. Run the repository's current official test and lint commands.
+5. Check the current PR template and contributor licensing requirements, then
+   open the PR against `wazuh/integrations`.
 
-[`UPSTREAM_PATH_DECISION.md`](UPSTREAM_PATH_DECISION.md) records the blocking
-destination decision and the live checks required before either placement is
-used.
-
-No occurrences of Vestrix rule IDs `100200–100211` were found in the branch's
-rules, decoders, or tests. However, those IDs are inside Wazuh's
-[documented `100000–120000` local/custom range](https://documentation.wazuh.com/current/user-manual/ruleset/rules/custom.html),
-and no core rules in the checked branch use that band. They remain unchanged
-in the candidate to preserve tested logic, but they are not presented as final
-upstream IDs.
-
-Before opening the upstream PR:
-
-1. confirm the destination repository and branch using
-   `UPSTREAM_PATH_DECISION.md`;
-2. recheck candidate filename availability against that branch;
-3. obtain an upstream core rule-ID block and update the rule XML and `test.ini`
-   together;
-4. run the upstream ruleset test and lint commands; and
-5. recheck the target branch's current PR template and contribution guidance.
+[`UPSTREAM_PATH_DECISION.md`](UPSTREAM_PATH_DECISION.md) records the resolved
+destination and confirmation date.
 
 ## References
 
-- [Wazuh ruleset contribution instructions](https://github.com/wazuh/wazuh/blob/master/ruleset/README.md#contribute)
+- [Wazuh integrations repository](https://github.com/wazuh/integrations)
+- [Wazuh integrations contribution guide](https://github.com/wazuh/integrations/blob/main/CONTRIBUTING.md)
 - [Wazuh custom decoder documentation](https://documentation.wazuh.com/current/user-manual/ruleset/decoders/custom.html)
 - [Wazuh custom rule documentation](https://documentation.wazuh.com/current/user-manual/ruleset/rules/custom.html)
 - [Vestrix local verification procedure](README.md)

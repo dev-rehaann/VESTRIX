@@ -1,50 +1,39 @@
 # Wazuh upstream path decision
 
-**Status:** Blocking — requires live confirmation against the current
-`wazuh/wazuh` repository and its root `CONTRIBUTING.md` before submission.
+**Status:** RESOLVED
 
-**Last reviewed:** 2026-08-02
+**Decision:** Target the `main` branch of
+[`wazuh/integrations`](https://github.com/wazuh/integrations). Submit the local
+`upstream/vestrix_integration/` directory as
+`integrations/vestrix_integration/` in that repository.
 
-## Possible submission paths
+**Confirmed:** 2026-08-02
 
-### A. Legacy flat ruleset pull request
+## Confirmation basis
 
-Use this path only if the selected `wazuh/wazuh` branch still accepts new
-integrations through `ruleset/decoders/`, `ruleset/rules/`, and
-`ruleset/testing/tests/`. In that case, recheck the numeric filenames and rule
-IDs against the target commit before opening the PR.
+The live repository and its root
+[`CONTRIBUTING.md`](https://github.com/wazuh/integrations/blob/main/CONTRIBUTING.md)
+were checked on the date above. The guide directs contributors to:
 
-### B. Ruleset-as-Code or detection-engineering workflow
+1. fork `wazuh/integrations`;
+2. create a branch;
+3. add a lowercase, underscore-separated directory under `integrations/`; and
+4. submit a pull request to `wazuh/integrations`.
 
-Use this path only if the current `wazuh/wazuh` contribution documentation
-links to an official repository or workflow for detection content. No specific
-RaC repository name or directory layout is confirmed by this package. Follow
-that repository's own `CONTRIBUTING.md`, schema, tests, naming, and licensing
-requirements; do not assume it mirrors the legacy XML layout.
+It lists `ruleset/`, `active_response/`, `sca/`, `threat_intel/`, and
+`dashboards/` as integration component directories. The Vestrix package uses
+that structure and includes explicit status files for components that are not
+implemented.
 
-## Required live checks
+## Superseded decision
 
-Immediately before submission:
+The earlier unresolved choice between a legacy flat `wazuh/wazuh` ruleset PR
+and an unspecified Ruleset-as-Code workflow is superseded. Neither is the
+target for this submission package.
 
-1. Inspect the current default branch and intended release branch of
-   `wazuh/wazuh`.
-2. Confirm whether `ruleset/decoders/`, `ruleset/rules/`, and
-   `ruleset/testing/tests/` exist and accept external integration PRs.
-3. Read the current root `CONTRIBUTING.md`, if present, plus any contribution
-   document it links.
-4. Check whether those documents link to a separate official RaC,
-   detection-content, or detection-engineering repository.
-5. If a separate repository is linked, verify its supported content format,
-   destination paths, test command, ID policy, license, and PR template.
-6. Record the selected repository, branch, and commit in `PR_DRAFT.md` before
-   opening the PR.
+## Remaining submission gates
 
-Until these checks select a route, the files under `upstream/` are portable
-source artifacts, not assertions about their final upstream paths.
-
-## Fallback
-
-If neither repository route can be confirmed, Wazuh's documented community
-fallback is its users mailing list. Subscribe by emailing
-`wazuh+subscribe@googlegroups.com`, then ask maintainers for the current
-decoder/rule contribution path.
+- Obtain maintainer approval for the final upstream rule-ID allocation.
+- Run the official upstream checks from the current target branch.
+- Recheck the target repository's PR template and licensing requirements
+  immediately before submission.

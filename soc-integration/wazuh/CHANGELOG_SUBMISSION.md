@@ -4,11 +4,12 @@
 
 ### Scope
 
-Prepared the existing Vestrix native decoder and rules for upstream review.
-The package adds numbered copies of the tested XML and a Wazuh-format
-`test.ini`; it does not change the live-tested source XML logic. The OCSF
-mapper remains a Vestrix-side integration and is outside the proposed Wazuh
-contribution.
+Prepared the existing Vestrix native decoder and rules for upstream review in
+`upstream/vestrix_integration/`, ready to be copied to
+`integrations/vestrix_integration/` in `wazuh/integrations`. The package adds
+numbered copies of the tested XML and a Wazuh-format `test.ini`; it does not
+change the live-tested source XML or test logic. The OCSF mapper remains a
+Vestrix-side integration and is outside the proposed Wazuh contribution.
 
 ### Decoder inventory
 
@@ -53,18 +54,16 @@ shipped unless a separately tested implementation is added later.
   `5763` and is manager-global because authentication events are not yet
   enriched with Vestrix `site_id` or `zone_id`.
 - The PACS rule depends on a finalized status from an external enricher.
-- Candidate upstream filenames `0585-vestrix_decoders.xml` and
-  `1000-vestrix_rules.xml` were verified free on branch `4.14.8` at commit
-  `f17b906579d1655b9a5093453c450eadf828f840`; recheck them at submission time.
 - The current IDs do not collide on that commit, but `100200–100211` are in
   Wazuh's [documented local/custom range](https://documentation.wazuh.com/current/user-manual/ruleset/rules/custom.html).
   A maintainer-approved upstream core ID block is still required, followed by
   synchronized XML and `test.ini` updates.
 - `test.ini` now covers a positive detection, a negative non-match, and the
-  decoder-name collision regression. The upstream ruleset lint/test run remains
-  pending until the destination branch and final IDs are confirmed.
-- `UPSTREAM_PATH_DECISION.md` now treats the destination as blocking and
-  records conditional legacy and Ruleset-as-Code paths without asserting an
-  unverified repository or layout.
-- Vestrix is Apache-2.0 licensed. Contributor licensing requirements for the
-  GPLv2 Wazuh repository must be confirmed before submitting copied XML.
+  decoder-name collision regression. The official upstream lint/test run
+  remains pending until final IDs are confirmed.
+- The destination was confirmed on 2026-08-02 from the live
+  `wazuh/integrations` repository and its `CONTRIBUTING.md`.
+- Active response, SCA, and threat-intelligence content are explicitly marked
+  not applicable. A dashboard remains planned but not built.
+- Vestrix is Apache-2.0 licensed. Contributor licensing requirements for
+  `wazuh/integrations` must be confirmed before submitting copied XML.
