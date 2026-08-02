@@ -24,11 +24,19 @@ This threat model is built on four assumptions:
 4. An attacker can attempt to suppress, delay, or interfere with delivery of sensor
    data and alerts.
 
+## Mapping scope
+
+The ATT&CK and CAPEC IDs and titles below were verified against MITRE's live
+catalogs on 2026-08-02 (CAPEC version 3.9). Enterprise ATT&CK mappings describe
+matching adversary behavior; they do not imply that Vestrix is an enterprise
+endpoint product. ATT&CK for ICS mappings apply directly only when Vestrix is
+deployed in an ICS/OT environment and are cross-domain analogues otherwise.
+
 ## Summary
 
 | Category | Status | Primary Control | ATT&CK/CAPEC Mapping |
 |---|---|---|---|
-| Physical tamper | `IMPLEMENTED` downstream handling; `PLANNED` sensor-side detection | Collector certificate allow-list; planned enclosure tamper event and liveness monitoring | ATT&CK [T1685](https://attack.mitre.org/techniques/T1685/), [T1200](https://attack.mitre.org/techniques/T1200/); CAPEC [401](https://capec.mitre.org/data/definitions/401.html), [507](https://capec.mitre.org/data/definitions/507.html), [547](https://capec.mitre.org/data/definitions/547.html) |
+| Physical tamper | `IMPLEMENTED` downstream handling; `PLANNED` sensor-side detection | Collector certificate allow-list; planned enclosure tamper event and liveness monitoring | ATT&CK [T1685](https://attack.mitre.org/techniques/T1685/); CAPEC [401](https://capec.mitre.org/data/definitions/401.html), [507](https://capec.mitre.org/data/definitions/507.html), [547](https://capec.mitre.org/data/definitions/547.html) |
 | Stream injection | `IMPLEMENTED` collector side; `PLANNED` firmware client | mTLS, certificate-CN allow-list, payload identity binding, per-node sequence check | ATT&CK [T1692.002](https://attack.mitre.org/techniques/T1692/002/), [T1565.002](https://attack.mitre.org/techniques/T1565/002/); CAPEC [594](https://capec.mitre.org/data/definitions/594.html) |
 | Log tampering | `IMPLEMENTED` chain and verifier; `PLANNED` complete external anchoring | Ed25519-signed SHA-256 hash chain and independent Rust verifier | ATT&CK [T1565.001](https://attack.mitre.org/techniques/T1565/001/), [T1070.004](https://attack.mitre.org/techniques/T1070/004/); CAPEC [93](https://capec.mitre.org/data/definitions/93.html), [268](https://capec.mitre.org/data/definitions/268.html) |
 | Alert suppression | `IMPLEMENTED` event mapping and Wazuh rules; `PLANNED` liveness controls | Wazuh/OCSF integration; planned heartbeat and missed-liveness detection | ATT&CK [T0878](https://attack.mitre.org/techniques/T0878/), [T1691.002](https://attack.mitre.org/techniques/T1691/002/), [T1498](https://attack.mitre.org/techniques/T1498/); CAPEC [125](https://capec.mitre.org/data/definitions/125.html), [595](https://capec.mitre.org/data/definitions/595.html), [601](https://capec.mitre.org/data/definitions/601.html) |
@@ -62,15 +70,16 @@ baseline without requiring a software exploit.
 
 ### Standards mapping
 
-- **MITRE ATT&CK [T1685 — Disable or Modify Tools](https://attack.mitre.org/techniques/T1685/):** disabling or degrading an intrusion-detection sensor is a direct behavioral fit.
-- **MITRE ATT&CK [T1200 — Hardware Additions](https://attack.mitre.org/techniques/T1200/):** applies to introduction of a rogue replacement or additional device. It does not precisely describe simple removal or destruction.
+- **MITRE ATT&CK Enterprise [T1685 — Disable or Modify Tools](https://attack.mitre.org/techniques/T1685/):** explicitly includes disabling, degrading, or tampering with intrusion-detection systems and sensors.
 - **CAPEC [401 — Physically Hacking Hardware](https://capec.mitre.org/data/definitions/401.html):** applies to unauthorized modification or covert replacement of installed hardware.
 - **CAPEC [507 — Physical Theft](https://capec.mitre.org/data/definitions/507.html):** applies when the node is removed and taken.
 - **CAPEC [547 — Physical Destruction of Device or Component](https://capec.mitre.org/data/definitions/547.html):** applies when the node or a required component is physically disabled or destroyed.
 
-ATT&CK does not define a single Enterprise technique that exactly represents removal
-of a field sensor. The ATT&CK mappings above are behavioral analogues; CAPEC provides
-the more direct physical-security mappings.
+ATT&CK does not define a single Enterprise technique that exactly represents every
+form of physical removal or replacement of a field sensor. T1200 (Hardware
+Additions) is intentionally excluded because it describes introducing hardware as
+an initial-access vector, not sensor removal or substitution. CAPEC provides the
+more direct physical-security mappings.
 
 ### Residual risk and known limitations
 
@@ -116,9 +125,9 @@ measurement.
 
 ### Standards mapping
 
-- **MITRE ATT&CK for ICS [T1692.002 — Unauthorized Message: Reporting Message](https://attack.mitre.org/techniques/T1692/002/):** the closest mapping for forged sensor telemetry presented as a legitimate report.
+- **MITRE ATT&CK for ICS [T1692.002 — Unauthorized Message: Reporting Message](https://attack.mitre.org/techniques/T1692/002/):** applies to forged sensor telemetry in an ICS/OT deployment and is the closest cross-domain analogue elsewhere.
 - **MITRE ATT&CK Enterprise [T1565.002 — Transmitted Data Manipulation](https://attack.mitre.org/techniques/T1565/002/):** applies to alteration of data while it is being transferred.
-- **MITRE ATT&CK Enterprise [T1557 — Adversary-in-the-Middle](https://attack.mitre.org/techniques/T1557/):** applies when local-segment positioning is used to intercept, modify, inject, replay, or block traffic.
+- **MITRE ATT&CK Enterprise [T1557 — Adversary-in-the-Middle](https://attack.mitre.org/techniques/T1557/):** applies when local-segment positioning is used to intercept or redirect traffic and enable follow-on manipulation or replay.
 - **CAPEC [594 — Traffic Injection](https://capec.mitre.org/data/definitions/594.html):** applies to crafted traffic injected to affect a networked system without relying on bulk flooding.
 
 ### Residual risk and known limitations
@@ -224,8 +233,8 @@ misinterpreted as an absence of intrusion rather than a failed or suppressed sen
 
 ### Standards mapping
 
-- **MITRE ATT&CK for ICS [T0878 — Alarm Suppression](https://attack.mitre.org/techniques/T0878/):** applies to preventing alerts from notifying operators.
-- **MITRE ATT&CK for ICS [T1691.002 — Block Operational Technology Message: Reporting Message](https://attack.mitre.org/techniques/T1691/002/):** the closest mapping for blocking sensor telemetry or a reporting event before it reaches its target.
+- **MITRE ATT&CK for ICS [T0878 — Alarm Suppression](https://attack.mitre.org/techniques/T0878/):** applies to preventing protection alarms from notifying operators in an ICS/OT deployment and is a behavioral analogue elsewhere.
+- **MITRE ATT&CK for ICS [T1691.002 — Block Operational Technology Message: Reporting Message](https://attack.mitre.org/techniques/T1691/002/):** applies to blocked reporting telemetry in an ICS/OT deployment and is the closest cross-domain analogue elsewhere.
 - **MITRE ATT&CK Enterprise [T1685 — Disable or Modify Tools](https://attack.mitre.org/techniques/T1685/):** applies to disabling sensors, logging agents, SIEM ingestion, or other defensive tooling.
 - **MITRE ATT&CK Enterprise [T1498 — Network Denial of Service](https://attack.mitre.org/techniques/T1498/):** applies when network capacity is exhausted to make the collector or alert destination unavailable.
 - **CAPEC [125 — Flooding](https://capec.mitre.org/data/definitions/125.html):** applies to resource exhaustion through a high volume of interactions.
@@ -287,8 +296,8 @@ which the operator must apply controls outside the Vestrix codebase.
 
 ---
 
-- **Document version:** 1.0.0
-- **Last updated:** 2026-07-13
+- **Document version:** 1.0.1
+- **Last updated:** 2026-08-02
 - **Project license:** Apache License 2.0
 - **Maintenance note:** This is a living document. It must be updated as controls,
   firmware, validation results, dependencies, and external technique mappings evolve.

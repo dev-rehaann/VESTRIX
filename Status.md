@@ -20,7 +20,7 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 - `filelock`-based concurrency safety
 - OpenTimestamps anchor stub in place
 - Normative `CHAIN_FORMAT.md` spec written
-- ⚠️ Known gap: spec lacks edge-case test vectors for float canonicalization (e.g. `1.0`, `0.30000000000000004`, `1e-05`) — needs explicit handling before it's considered airtight
+- Binary64 canonicalization vectors cover `1.0`, `0.30000000000000004`, `1e-05`, signed zero, and exponent boundaries across the Python writer and Rust verifier
 
 ### 3. Rust Verifier CLI
 
@@ -36,18 +36,9 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 ### 5. Documentation & Promotion Groundwork
 
 - Full promotional README section drafted: competitive gap table, text architecture diagram, component status table, quick-links placeholders
-- `docs/threat-model.md` generated (via Codex prompt) — currently mid-audit (see below)
+- `docs/threat-model.md` ATT&CK/CAPEC mappings audited against MITRE's live catalogs; ICS-only mappings are explicitly conditional and the incorrect T1200 mapping was removed
 - `ml/benchmarks/BENCHMARKS.md` expanded into the append-only benchmark template for dataset provenance, leakage checks, per-class metrics, confusion matrices, cross-room/device evaluation, and unflattering results; no real benchmark run exists yet
 - Duplicate non-goals and initialization documents consolidated under `docs/`
-
----
-
-## 🚧 In Progress
-
-- **Threat model ATT&CK/CAPEC mapping audit** — `docs/threat-model.md` needs its technique/pattern IDs verified before it can be trusted as accurate. Specific IDs flagged for verification:
-    - `T1685`
-    - ICS `T0878`
-    - This audit is a **blocking dependency** for the v0.1 public tag
 
 ---
 
@@ -56,7 +47,6 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 |Item|Status|Blocker|
 |---|---|---|
 |ESP32 firmware (CSI capture)|Not started|Hardware not yet arrived (one unit on order/en route)|
-|Float canonicalization test vectors in `CHAIN_FORMAT.md`|Not started|—|
 |Leave-one-room-out / leave-one-device-out validation suite|Not started|Depends on firmware + real CSI data|
 |Multi-node zone fusion / localization|Not started (moonshot tier)|Depends on firmware + multiple nodes|
 |Labeled intrusion CSI dataset (Zenodo DOI)|Not started|Depends on firmware + collected data|
@@ -70,11 +60,9 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 
 ## Immediate Next Steps (priority order)
 
-1. **Finish the ATT&CK/CAPEC ID audit** on `docs/threat-model.md` — this is the explicit blocker for tagging v0.1
-2. Add float-canonicalization edge-case test vectors to `CHAIN_FORMAT.md`
-3. Once ESP32 hardware arrives: begin firmware development (CSI capture via ESP-IDF)
-4. Submit Wazuh decoder/rules upstream + PR into relevant awesome-lists (low-effort, high-return — doesn't require firmware)
-5. Tag v0.1 once threat model audit is complete
+1. Submit Wazuh decoder/rules upstream + PR into relevant awesome-lists (low-effort, high-return — doesn't require firmware)
+2. Once ESP32 hardware arrives: begin firmware development (CSI capture via ESP-IDF)
+3. Tag v0.1 once the roadmap exit criterion is met: a reliable CSI stream from at least one node reaches the collector
 
 ---
 
