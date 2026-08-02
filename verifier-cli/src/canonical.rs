@@ -161,11 +161,18 @@ fn format_number(number: &Number) -> Result<String, String> {
         .as_f64()
         .filter(|value| value.is_finite())
         .ok_or_else(|| "number is not a finite binary64 value".to_owned())?;
-    Ok(format_python_float(value))
+    canonicalize_float(value)
 }
 
-/// Render finite binary64 exactly like CPython's JSON encoder.
-fn format_python_float(value: f64) -> String {
+/// Render one finite binary64 using the Vestrix chain-v1 canonical spelling.
+pub fn canonicalize_float(value: f64) -> Result<String, String> {
+    if !value.is_finite() {
+        return Err("NaN and infinity are not permitted".to_owned());
+    }
+    Ok(format_finite_float(value))
+}
+
+fn format_finite_float(value: f64) -> String {
     if value == 0.0 {
         return if value.is_sign_negative() {
             "-0.0".to_owned()
@@ -272,10 +279,21 @@ mod tests {
         for (value, expected) in cases {
             let number = Number::from_f64(value).expect("test values are finite");
             assert_eq!(
-                serialize(&Value::Number(number)).unwrap(),
-                expected.as_bytes(),
+                canonicalize_float(value).unwrap(),
+                expected,
                 "input {value:?}"
             );
+            assert_eq!(
+                serialize(&Value::Number(number)).unwrap(),
+                expected.as_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_finite_floats() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(canonicalize_float(value).is_err());
         }
     }
 
