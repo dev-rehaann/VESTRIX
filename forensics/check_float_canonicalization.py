@@ -1,4 +1,8 @@
-"""Check every chain-v1 float vector against Python and Rust."""
+"""Check every chain-v1 float vector against Python and Rust.
+
+CI dependency: ``cargo`` and a Rust toolchain must be on PATH. ``cargo run``
+builds the thin Rust example CLI before executing it.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from pathlib import Path
 from float_canonical import canonicalize_float
 
 ROOT = Path(__file__).resolve().parents[1]
-VECTORS_PATH = Path(__file__).with_name("CHAIN_FORMAT_TEST_VECTORS.json")
+VECTORS_PATH = ROOT / "tests" / "vectors" / "float_canonicalization.json"
 REJECTED = "<rejected>"
 
 

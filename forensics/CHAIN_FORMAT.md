@@ -55,7 +55,7 @@ Consequently:
    emitted directly and the result is encoded as UTF-8.
 4. `true`, `false`, and `null` are lowercase.
 5. Integers are base-10 with no leading zero. Binary64 values follow the
-   normative Float Canonicalization Rules below. An implementation must not
+   normative Float Canonicalization section below. An implementation must not
    delegate this choice to an unspecified language-default formatter.
 
 For the unsigned object described below, the resulting top-level key order is:
@@ -72,66 +72,129 @@ class, confidence, features_hash, model_config_hash, model_id, node_id,
 prev_hash, raw_csi_hash, record_hash, seq, signature, top_shap, ts_utc
 ```
 
-## Float Canonicalization Rules
+## Float Canonicalization
 
-These rules are normative for every value represented as an IEEE 754 binary64,
+This section is normative for every value represented as an IEEE 754 binary64,
 including a float-typed `confidence` and binary64 values nested in `top_shap`.
-The input to canonicalization is the 64-bit binary64 value, not its source-code
-spelling.
+The canonicalizer receives the 64-bit binary64 value, not its source-code
+spelling or an independently recomputed mathematical value.
 
-1. Reject NaN, positive infinity, and negative infinity before hashing.
-2. Render positive zero as `0.0` and negative zero as `-0.0`. The sign bit of
-   zero is hash-significant.
+### Chosen representation and tradeoffs
+
+Chain format version 1 adopts **shortest round-trippable decimal JSON numbers**
+(option (a)). The goal is the same as RFC 8785/JCS: one deterministic,
+human-readable decimal token that recovers the identical binary64 value. The
+fixed/scientific thresholds below deliberately retain the established CPython
+3.11 JSON spelling, however, so this format is not byte-compatible with JCS at
+every exponent.
+
+Encoding the raw binary64 bits as 16 hexadecimal digits (option (c)) gives a
+simpler bit-level guarantee, but it changes a JSON number into a string or a
+new tagged structure. Applying it to version 1 would therefore change the
+schema, historical `record_bytes`, hashes, and signatures. Fixed precision
+(option (b)) is rejected because it either loses information or requires an
+application-specific scale that does not fit both CSI features and SHAP values.
+
+> **Maintainer sign-off required:** version 1 retains option (a) to avoid a
+> breaking format change. If hexadecimal binary64 is preferred, it must be
+> introduced as a new chain-format version; it cannot be substituted into
+> version 1.
+
+### Canonical form
+
+1. Reject NaN, positive infinity, and negative infinity as validation errors
+   before hashing. They have no canonical token.
+2. Render positive zero as `0.0` and negative zero as `-0.0`. The zero sign bit
+   is preserved because normalization would discard recorded input state and
+   would change version-1 bytes.
 3. For any other value, obtain the shortest correctly rounded decimal
    significand that parses back to exactly the same binary64 bits under IEEE
    754 round-to-nearest, ties-to-even. If equally short candidates exist, use
-   the candidate closest to the exact binary64 value; an exact midpoint is
-   resolved by an even final digit. Remove no digit needed for round-trip.
+   the candidate closest to the exact binary64 value; resolve an exact midpoint
+   with an even final digit. Remove no digit required for round-trip.
 4. Let `k` be the adjusted base-10 exponent: the exponent when exactly one
    significant digit is placed before the decimal point.
 5. If `-4 <= k < 16`, use fixed-point notation. Insert leading or trailing
-   zeroes as required. Remove trailing fractional zeroes, but if the result has
-   no fractional digits, append `.0` to preserve the binary64 type.
+   zeroes as required. Remove trailing fractional zeroes, but append `.0` when
+   no fractional digits remain so a binary64 stays distinct from a JSON integer.
 6. Otherwise use scientific notation with one digit before the decimal point.
    Include a decimal point only when more significant digits follow. Use a
    lowercase `e`, always include the exponent sign, and pad an exponent whose
    magnitude is below 10 to two digits. Do not truncate exponents with three or
    more digits.
 7. Prefix `-` for negative values. Do not emit a leading `+`, locale-specific
-   separators, whitespace, or uppercase exponent markers.
+   separators, whitespace, or an uppercase exponent marker.
 
-This is the shortest-round-trip rendering used by CPython 3.11's JSON encoder,
-made explicit so independent implementations do not rely on their language's
-default float-to-string thresholds. It preserves every binary64 value without
-introducing a fixed rounding precision and, critically, preserves the existing
-chain-format version 1 bytes.
+Finite subnormal values use the same algorithm and round-trip to the identical
+binary64 bits, including the smallest positive subnormal. No flush-to-zero is
+permitted.
 
-### Worked examples
+### Precision and rounding boundaries
 
-| Binary64 value | Canonical token | Reason |
-|---|---|---|
-| `1.0` | `1.0` | The value is float-typed, so the otherwise integral fixed-point result keeps `.0`. |
-| `0.30000000000000004` | `0.30000000000000004` | Removing digits would round-trip to different binary64 bits. |
-| `0.00001` (`1e-05`) | `1e-05` | Adjusted exponent `-5` selects scientific notation and the exponent is zero-padded. |
+The binary64 bits are authoritative. Decimal source text is rounded to binary64
+once, before canonicalization; the canonicalizer performs no quantization or
+application-level rounding. Thus the binary64 result of `0.1 + 0.2` is emitted
+as `0.30000000000000004`, and decimal input `2.675` is emitted as `2.675` even
+though its stored value is slightly below the mathematical decimal value.
+
+The guarantee is **identical binary64 bits produce identical canonical bytes**.
+Two computations that are mathematically equal but round to different binary64
+bits intentionally produce different bytes. Making them equal would require a
+domain-specific rounding rule and would discard evidence; producers that need
+such normalization must do it before creating the log value and must specify it
+in the model or feature-generation contract.
+
+### Worked full-entry example
+
+Suppose the producer creates this complete unsigned entry (the exact object
+that is hashed and signed). The SHAP contribution came from `0.1 + 0.2` and has
+binary64 bits `3fd3333333333334`; `confidence` has bits `3fda3d70a3d70a3d`.
+
+```json
+{
+  "seq": 0,
+  "ts_utc": "2026-07-13T12:00:00Z",
+  "node_id": "node-01",
+  "raw_csi_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "features_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+  "model_id": "model-v1",
+  "model_config_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+  "class": "intrusion",
+  "confidence": 0.41,
+  "top_shap": [{"feature": "phase_variance", "contribution": 0.30000000000000004}],
+  "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+}
+```
+
+Its canonical `record_bytes` are exactly the following ASCII/UTF-8 bytes, with
+no BOM and no trailing LF:
+
+```text
+{"class":"intrusion","confidence":0.41,"features_hash":"2222222222222222222222222222222222222222222222222222222222222222","model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":0,"top_shap":[{"contribution":0.30000000000000004,"feature":"phase_variance"}],"ts_utc":"2026-07-13T12:00:00Z"}
+```
 
 ### Float canonicalization test vectors
 
 The `binary64 hex` column is the normative input and removes ambiguity caused
 by parsing decimal source text. The input label is explanatory. The versioned,
 machine-readable copy is
-[`CHAIN_FORMAT_TEST_VECTORS.json`](CHAIN_FORMAT_TEST_VECTORS.json).
+[`tests/vectors/float_canonicalization.json`](../tests/vectors/float_canonicalization.json).
 
 | Input label | Binary64 hex | Canonical token | Divergence covered |
 |---|---|---|---|
 | `1.0` | `3ff0000000000000` | `1.0` | Float type marker on an integral value |
 | `0.30000000000000004` | `3fd3333333333334` | `0.30000000000000004` | Required shortest-round-trip digits |
-| `0.00001` | `3ee4f8b588e368f1` | `1e-05` | Fixed/scientific threshold and exponent padding |
-| `0.0` | `0000000000000000` | `0.0` | Positive zero |
 | `-0.0` | `8000000000000000` | `-0.0` | Negative-zero sign preservation |
+| `0.0` | `0000000000000000` | `0.0` | Positive zero distinguishes the two zero bit patterns |
+| `0.00001` | `3ee4f8b588e368f1` | `1e-05` | Fixed/scientific threshold and exponent padding |
+| `1e21` | `444b1ae4d6e2ef50` | `1e+21` | Large-magnitude exponent notation |
+| decimal integer `9007199254740993` converted to binary64 | `4340000000000000` | `9007199254740992.0` | First integer not exactly representable as binary64 |
 | `5e-324` | `0000000000000001` | `5e-324` | Smallest positive subnormal |
 | `2.225073858507201e-308` | `000fffffffffffff` | `2.225073858507201e-308` | Largest subnormal |
 | `2.2250738585072014e-308` | `0010000000000000` | `2.2250738585072014e-308` | Smallest positive normal |
 | `1.7976931348623157e308` | `7fefffffffffffff` | `1.7976931348623157e+308` | Largest finite value and three-digit exponent |
+| decimal input `2.675` | `4005666666666666` | `2.675` | Decimal rounding-boundary value without naive rounding |
+| SHAP contribution `0.41` | `3fda3d70a3d70a3d` | `0.41` | Representative explanation value |
 | decimal input `1.23456789012345678` | `3ff3c0ca428c59fb` | `1.2345678901234567` | Binary64 rounding and 17-digit boundary |
 | `-0.125` | `bfc0000000000000` | `-0.125` | Exactly representable negative fraction |
 | `42.0` | `4045000000000000` | `42.0` | Integer-looking binary64 |
@@ -141,20 +204,21 @@ machine-readable copy is
 | `0.00000012` | `3e801b2b29a4692b` | `1.2e-07` | Lowercase `e` and negative exponent padding |
 | `100000000000000000000.0` | `4415af1d78b58c40` | `1e+20` | Python/Rust default notation divergence |
 | `-12345.6789` | `c0c81cd6e631f8a1` | `-12345.6789` | Negative fixed-point value |
-| `9007199254740992.0` | `4340000000000000` | `9007199254740992.0` | Exact-integer precision boundary |
 | NaN | `7ff8000000000000` | rejected | Non-finite value |
 | positive infinity | `7ff0000000000000` | rejected | Non-finite value |
 | negative infinity | `fff0000000000000` | rejected | Non-finite value |
 
 ### Integer-versus-float schema boundary
 
-Chain format version 1 does not coerce JSON integers into binary64 values. The
-JSON integer `1` canonicalizes as `1`; binary64 `1.0` canonicalizes as `1.0`,
-and the two records hash differently. The current `confidence` schema says
-`number`, so either representation can arrive from a producer. Producers must
-therefore preserve and consistently choose the intended numeric type. Changing
-this boundary would require a new chain-format version; it must not be guessed
-or normalized by a version-1 verifier.
+Chain format version 1 does not pass JSON integers through float
+canonicalization. The signed-64-bit JSON integer `9007199254740993` is valid
+and emits exactly `9007199254740993`; only an explicit conversion to binary64
+rounds it to the vector above. Likewise, integer `1` emits `1`, binary64 `1.0`
+emits `1.0`, and the records hash differently. The current `confidence` schema
+says `number`, so either representation can arrive from a producer. Producers
+must preserve and consistently choose the intended numeric type. Changing this
+boundary requires a new chain-format version; a verifier must not guess or
+normalize it.
 
 Reference implementations are
 [`float_canonical.py`](float_canonical.py) and
@@ -273,6 +337,6 @@ No other byte changes.
 | `0.1 + 0.2` | `0.30000000000000004` | `3aa30e8f2ae3dbf23a617238837d97363be4aef9c9ff99a44d4c5ac44ca233d1` | `e1b7ac82d66bfe177c1ba65a77b21ffde25e9e31d0d13075711df1256a85e940bfcb62ee7602dda55ab0b58c2e532c9537188dc8f168a7d20cdbecbc08926001` |
 | `0.00001` | `1e-05` | `10869621de6d71b59d6a112924e22ae7c152b3247e87695730300ba0bd7c8d27` | `5c84aee62bd7bcf98dfe7e9c11bbdafd214869f8e142f6cd340910a67674d8a7cc1f1691d8b11c09d2d6a9ecfc185300fc0e5f2c6904e2e3f0c346e180b3a808` |
 
-The complete scalar vector set appears in Float Canonicalization Rules above.
+The complete scalar vector set appears in Float Canonicalization above.
 Negative finite binary64 values are valid inside `top_shap` even though values
 below zero are invalid for `confidence`.

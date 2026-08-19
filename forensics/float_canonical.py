@@ -7,7 +7,7 @@ import math
 
 
 def canonicalize_float(value: float) -> str:
-    """Return the chain-v1 canonical token for one finite binary64 value."""
+    """Implement CHAIN_FORMAT.md ``Float Canonicalization`` for binary64."""
     if not isinstance(value, float):
         raise TypeError("value must be a binary64 float")
     if not math.isfinite(value):

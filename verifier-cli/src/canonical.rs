@@ -9,6 +9,20 @@ use std::fmt;
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value};
 
+/// Failure to canonicalize a value forbidden by the chain format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanonicalizeError {
+    NonFinite,
+}
+
+impl fmt::Display for CanonicalizeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("NaN and infinity are not permitted")
+    }
+}
+
+impl std::error::Error for CanonicalizeError {}
+
 /// A JSON value parsed while rejecting duplicate object keys.
 pub struct StrictValue(pub Value);
 
@@ -161,13 +175,13 @@ fn format_number(number: &Number) -> Result<String, String> {
         .as_f64()
         .filter(|value| value.is_finite())
         .ok_or_else(|| "number is not a finite binary64 value".to_owned())?;
-    canonicalize_float(value)
+    canonicalize_float(value).map_err(|error| error.to_string())
 }
 
-/// Render one finite binary64 using the Vestrix chain-v1 canonical spelling.
-pub fn canonicalize_float(value: f64) -> Result<String, String> {
+/// Implement CHAIN_FORMAT.md `Float Canonicalization` for one binary64 value.
+pub fn canonicalize_float(value: f64) -> Result<String, CanonicalizeError> {
     if !value.is_finite() {
-        return Err("NaN and infinity are not permitted".to_owned());
+        return Err(CanonicalizeError::NonFinite);
     }
     Ok(format_finite_float(value))
 }
@@ -293,7 +307,7 @@ mod tests {
     #[test]
     fn rejects_non_finite_floats() {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert!(canonicalize_float(value).is_err());
+            assert_eq!(canonicalize_float(value), Err(CanonicalizeError::NonFinite));
         }
     }
 

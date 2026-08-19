@@ -1,0 +1,158 @@
+{
+  "format_version": 1,
+  "canonicalization": "vestrix-binary64-shortest-round-trip-v1",
+  "valid_vectors": [
+    {
+      "input": "binary64 1.0",
+      "binary64_hex": "3ff0000000000000",
+      "canonical": "1.0",
+      "note": "Integer-valued binary64 must retain the .0 suffix."
+    },
+    {
+      "input": "binary64 result of decimal 0.1 + decimal 0.2",
+      "binary64_hex": "3fd3333333333334",
+      "canonical": "0.30000000000000004",
+      "note": "Shortening to 0.3 would recover different binary64 bits."
+    },
+    {
+      "input": "binary64 negative zero",
+      "binary64_hex": "8000000000000000",
+      "canonical": "-0.0",
+      "note": "Preserves the IEEE 754 negative-zero sign bit."
+    },
+    {
+      "input": "binary64 positive zero",
+      "binary64_hex": "0000000000000000",
+      "canonical": "0.0",
+      "note": "Distinguishes positive zero from negative zero."
+    },
+    {
+      "input": "binary64 nearest to decimal 1e-5",
+      "binary64_hex": "3ee4f8b588e368f1",
+      "canonical": "1e-05",
+      "note": "Catches fixed/scientific notation and exponent-padding differences."
+    },
+    {
+      "input": "binary64 nearest to decimal 1e21",
+      "binary64_hex": "444b1ae4d6e2ef50",
+      "canonical": "1e+21",
+      "note": "Covers large-magnitude exponent notation."
+    },
+    {
+      "input": "decimal integer 9007199254740993 converted to binary64 using round-to-nearest, ties-to-even",
+      "binary64_hex": "4340000000000000",
+      "canonical": "9007199254740992.0",
+      "note": "The first integer not exactly representable as binary64 rounds down; JSON integers do not use this path."
+    },
+    {
+      "input": "smallest positive binary64 subnormal",
+      "binary64_hex": "0000000000000001",
+      "canonical": "5e-324",
+      "note": "Proves subnormal values are not flushed to zero."
+    },
+    {
+      "input": "largest positive binary64 subnormal",
+      "binary64_hex": "000fffffffffffff",
+      "canonical": "2.225073858507201e-308",
+      "note": "Covers the value immediately below the normal range."
+    },
+    {
+      "input": "smallest positive normal binary64",
+      "binary64_hex": "0010000000000000",
+      "canonical": "2.2250738585072014e-308",
+      "note": "Covers the boundary with the subnormal range."
+    },
+    {
+      "input": "largest finite positive binary64",
+      "binary64_hex": "7fefffffffffffff",
+      "canonical": "1.7976931348623157e+308",
+      "note": "Covers the maximum finite value and a three-digit exponent."
+    },
+    {
+      "input": "binary64 nearest to decimal 2.675",
+      "binary64_hex": "4005666666666666",
+      "canonical": "2.675",
+      "note": "Covers a decimal rounding boundary without applying naive decimal rounding."
+    },
+    {
+      "input": "binary64 nearest to representative SHAP contribution 0.41",
+      "binary64_hex": "3fda3d70a3d70a3d",
+      "canonical": "0.41",
+      "note": "Sanity-checks a realistic explanation value."
+    },
+    {
+      "input": "decimal 1.23456789012345678 rounded to binary64",
+      "binary64_hex": "3ff3c0ca428c59fb",
+      "canonical": "1.2345678901234567",
+      "note": "Requires 17 significant digits for the selected binary64 value."
+    },
+    {
+      "input": "exact binary64 -0.125",
+      "binary64_hex": "bfc0000000000000",
+      "canonical": "-0.125",
+      "note": "Covers an exactly representable negative fraction."
+    },
+    {
+      "input": "binary64 42.0",
+      "binary64_hex": "4045000000000000",
+      "canonical": "42.0",
+      "note": "Keeps an integer-looking binary64 distinct from JSON integer 42."
+    },
+    {
+      "input": "binary64 nearest to decimal 0.0001",
+      "binary64_hex": "3f1a36e2eb1c432d",
+      "canonical": "0.0001",
+      "note": "Adjusted exponent -4 remains fixed-point."
+    },
+    {
+      "input": "binary64 10000000000000000.0",
+      "binary64_hex": "4341c37937e08000",
+      "canonical": "1e+16",
+      "note": "Adjusted exponent 16 switches to scientific notation."
+    },
+    {
+      "input": "binary64 nearest to decimal 999999999999999.9",
+      "binary64_hex": "430c6bf52633ffff",
+      "canonical": "999999999999999.9",
+      "note": "Covers a large fixed-point value below the scientific threshold."
+    },
+    {
+      "input": "binary64 nearest to decimal 0.00000012",
+      "binary64_hex": "3e801b2b29a4692b",
+      "canonical": "1.2e-07",
+      "note": "Requires lowercase e, a negative sign, and a zero-padded exponent."
+    },
+    {
+      "input": "binary64 100000000000000000000.0",
+      "binary64_hex": "4415af1d78b58c40",
+      "canonical": "1e+20",
+      "note": "Catches default Rust fixed-point output versus canonical scientific notation."
+    },
+    {
+      "input": "binary64 nearest to decimal -12345.6789",
+      "binary64_hex": "c0c81cd6e631f8a1",
+      "canonical": "-12345.6789",
+      "note": "Covers a negative, non-integral fixed-point value."
+    }
+  ],
+  "invalid_vectors": [
+    {
+      "input": "quiet NaN binary64",
+      "binary64_hex": "7ff8000000000000",
+      "canonical": null,
+      "note": "NaN is rejected as a validation error before hashing."
+    },
+    {
+      "input": "positive infinity binary64",
+      "binary64_hex": "7ff0000000000000",
+      "canonical": null,
+      "note": "Positive infinity is rejected as a validation error before hashing."
+    },
+    {
+      "input": "negative infinity binary64",
+      "binary64_hex": "fff0000000000000",
+      "canonical": null,
+      "note": "Negative infinity is rejected as a validation error before hashing."
+    }
+  ]
+}

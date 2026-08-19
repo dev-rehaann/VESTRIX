@@ -1,6 +1,6 @@
 # Vestrix — Project Status
 
-_Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updated: August 2, 2026_
+_Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updated: August 19, 2026_
 
 > Note: project renamed from **Sentrix → Vestrix** after a trademark conflict was found with an active enterprise cybersecurity company (plus other naming collisions). Minor phonetic overlap with "Vectrix" (a cloud/SaaS security scanner) was reviewed and accepted as a low risk. Repository documentation now uses the Vestrix name.
 
@@ -19,8 +19,8 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 - Ed25519 signing of log entries
 - `filelock`-based concurrency safety
 - OpenTimestamps anchor stub in place
-- Normative `CHAIN_FORMAT.md` spec written
-- Binary64 canonicalization vectors cover `1.0`, `0.30000000000000004`, `1e-05`, signed zero, and exponent boundaries across the Python writer and Rust verifier
+- Normative `CHAIN_FORMAT.md` spec includes prescriptive binary64 canonicalization, non-finite rejection, rounding boundaries, and a byte-exact worked entry
+- Cross-language harness proves byte-identical Python/Rust output for 25 binary64 vectors (22 canonical, 3 rejected), including signed zero, subnormals, precision boundaries, and exponent thresholds
 
 ### 3. Rust Verifier CLI
 
@@ -47,6 +47,7 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 
 |Item|Status|Blocker|
 |---|---|---|
+|Chain-v1 float representation sign-off|Decision pending|Version 1 retains shortest-round-trip decimal to preserve existing bytes; binary64 hex would require a new format version|
 |ESP32 firmware (CSI capture)|Not started|Hardware not yet arrived (one unit on order/en route)|
 |Leave-one-room-out / leave-one-device-out validation suite|Not started|Depends on firmware + real CSI data|
 |Multi-node zone fusion / localization|Not started (moonshot tier)|Depends on firmware + multiple nodes|
@@ -61,9 +62,10 @@ _Forensics-grade, open-source WiFi CSI intrusion detection platform_ _Last updat
 
 ## Immediate Next Steps (priority order)
 
-1. Submit Wazuh decoder/rules upstream + PR into relevant awesome-lists (low-effort, high-return — doesn't require firmware)
-2. Once ESP32 hardware arrives: begin firmware development (CSI capture via ESP-IDF)
-3. Tag v0.1 once the roadmap exit criterion is met: a reliable CSI stream from at least one node reaches the collector
+1. Sign off the chain-v1 float representation decision (retain decimal; reserve binary64 hex for a future format version)
+2. Submit Wazuh decoder/rules upstream + PR into relevant awesome-lists (low-effort, high-return — doesn't require firmware)
+3. Once ESP32 hardware arrives: begin firmware development (CSI capture via ESP-IDF)
+4. Tag v0.1 once the roadmap exit criterion is met: a reliable CSI stream from at least one node reaches the collector
 
 ---
 
