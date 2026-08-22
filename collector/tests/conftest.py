@@ -15,11 +15,15 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 class Identity:
     cert: Path
     key: Path
+    certificate: x509.Certificate
 
 
 @dataclass(frozen=True, slots=True)
 class CertificateBundle:
     ca_cert: Path
+    crl_path: Path
+    ca_certificate: x509.Certificate
+    ca_key: rsa.RSAPrivateKey
     server: Identity
     enrolled_node: Identity
     unenrolled_node: Identity
@@ -79,7 +83,7 @@ def _issue_identity(
     key_path = directory / f"{common_name}.key"
     _write_cert(cert_path, cert)
     _write_key(key_path, key)
-    return Identity(cert=cert_path, key=key_path)
+    return Identity(cert=cert_path, key=key_path, certificate=cert)
 
 
 def _self_signed_identity(directory: Path, common_name: str) -> Identity:
@@ -112,7 +116,39 @@ def _self_signed_identity(directory: Path, common_name: str) -> Identity:
     key_path = directory / f"{common_name}.key"
     _write_cert(cert_path, cert)
     _write_key(key_path, key)
-    return Identity(cert=cert_path, key=key_path)
+    return Identity(cert=cert_path, key=key_path, certificate=cert)
+
+
+def write_crl(
+    certificates: CertificateBundle,
+    revoked_identities: tuple[Identity, ...] = (),
+) -> None:
+    """Write a test CRL containing the supplied identities."""
+    now = datetime.now(UTC)
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(certificates.ca_certificate.subject)
+        .last_update(now - timedelta(minutes=1))
+        .next_update(now + timedelta(days=1))
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                certificates.ca_key.public_key()
+            ),
+            critical=False,
+        )
+    )
+    for identity in revoked_identities:
+        builder = builder.add_revoked_certificate(
+            x509.RevokedCertificateBuilder()
+            .serial_number(identity.certificate.serial_number)
+            .revocation_date(now)
+            .build()
+        )
+    certificates.crl_path.write_bytes(
+        builder.sign(certificates.ca_key, hashes.SHA256()).public_bytes(
+            serialization.Encoding.PEM
+        )
+    )
 
 
 @pytest.fixture
@@ -155,8 +191,11 @@ def certificates(tmp_path: Path) -> CertificateBundle:
     ca_path = tmp_path / "ca.crt"
     _write_cert(ca_path, ca_cert)
 
-    return CertificateBundle(
+    bundle = CertificateBundle(
         ca_cert=ca_path,
+        crl_path=tmp_path / "ca.crl",
+        ca_certificate=ca_cert,
+        ca_key=ca_key,
         server=_issue_identity(
             tmp_path,
             common_name="collector-test",
@@ -180,3 +219,5 @@ def certificates(tmp_path: Path) -> CertificateBundle:
         ),
         self_signed_node=_self_signed_identity(tmp_path, "rogue-node"),
     )
+    write_crl(bundle)
+    return bundle

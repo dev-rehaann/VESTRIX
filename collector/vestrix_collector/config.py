@@ -16,6 +16,7 @@ class ConfigError(ValueError):
 @dataclass(frozen=True, slots=True)
 class TLSConfig:
     ca_cert: Path
+    crl_path: Path
     server_cert: Path
     server_key: Path
 
@@ -81,7 +82,7 @@ def load_config(path: str | Path) -> CollectorConfig:
     root = _mapping(raw, "config")
     _exact_keys(root, {"tls", "allowlist_path", "server"}, "config")
     tls = _mapping(root["tls"], "tls")
-    _exact_keys(tls, {"ca_cert", "server_cert", "server_key"}, "tls")
+    _exact_keys(tls, {"ca_cert", "crl_path", "server_cert", "server_key"}, "tls")
     server = _mapping(root["server"], "server")
     required_server_keys = {"host", "port"}
     optional_server_keys = {
@@ -111,6 +112,7 @@ def load_config(path: str | Path) -> CollectorConfig:
     return CollectorConfig(
         tls=TLSConfig(
             ca_cert=_resolve_path(base_dir, tls["ca_cert"], "tls.ca_cert"),
+            crl_path=_resolve_path(base_dir, tls["crl_path"], "tls.crl_path"),
             server_cert=_resolve_path(base_dir, tls["server_cert"], "tls.server_cert"),
             server_key=_resolve_path(base_dir, tls["server_key"], "tls.server_key"),
         ),
