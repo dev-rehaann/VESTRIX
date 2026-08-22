@@ -21,22 +21,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest
-          # Project dependencies get installed here once requirements files exist:
-          # pip install -r pipeline/requirements.txt
-          # pip install -r ml/requirements.txt
-          # pip install -r forensics/requirements.txt
+          pip install ruff==0.15.21 pytest==9.1.1
+          pip install -r collector/requirements.txt
+          pip install -r forensics/requirements.txt
+          pip install -e ./collector
+          pip install -e ./soc-integration
 
       - name: Lint (ruff)
         run: |
-          ruff check . || true
-          # Remove "|| true" once the codebase has enough Python to lint meaningfully
+          ruff check .
 
       - name: Run tests
         run: |
-          pytest -q || true
-          # Remove "|| true" once tests exist — hash-chain integrity tests are non-negotiable
-          # per docs/GETTING_STARTED.md step 8
+          pytest -q
 
   wazuh-rule-validation:
     name: Validate Wazuh rules/decoders syntax
@@ -51,10 +48,35 @@ jobs:
             python3 -c "import xml.etree.ElementTree as ET; ET.parse('$f')"
           done
 
-  # verifier-cli-build:
-  #   name: Build + test verifier CLI
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Build (Rust/Go — set up once language is chosen)
-  #       run: echo "Add build steps once verifier-cli language is finalized"
+  verifier-cli-build:
+    name: Build + test verifier CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            verifier-cli/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('verifier-cli/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run Rust tests
+        working-directory: verifier-cli
+        run: cargo test --all-targets --all-features
+
+      - name: Run Clippy
+        working-directory: verifier-cli
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Verify Python/Rust float canonicalization parity
+        run: python3 forensics/check_float_canonicalization.py

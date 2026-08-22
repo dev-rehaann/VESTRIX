@@ -1,5 +1,7 @@
 # forensics
 
-Hash-chained event logger and OpenTimestamps anchoring client. Not yet implemented.
+Hash-chained event logger and OpenTimestamps anchoring interface.
 
-Status: not yet implemented — see `docs/ROADMAP.md` for the tier this belongs to.
+Status: hash-chain logging, Ed25519 signing and verification, and concurrency-safe
+append are implemented and tested. The production OpenTimestamps backend remains
+a placeholder.
