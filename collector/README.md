@@ -10,9 +10,8 @@ Accepted events are acknowledged only after a durable signed append; append fail
 rejects the event. Rejected ingest attempts remain structured collector decision
 logs and are not appended to the signed chain.
 
-The version-1 collector-ingest profile records `csi_window_sha256` as
-`raw_csi_hash`, uses the SHA-256 of empty content when features are unavailable,
-identifies the adapter in the model fields, records `collector_event_accepted` with
-confidence `1.0` (transport acceptance, not ML confidence), and stores the collector
-schema version and sequence number in `top_shap`. ESP32 client provisioning and
-automated certificate enrollment/rotation are not implemented.
+The chain-format-v2 adapter emits an `ingestion_accepted` record containing the
+mapped `raw_csi_hash`, `collector_schema_version`, and
+`collector_sequence_number`. It does not emit ML-only feature, model, class,
+confidence, or SHAP fields. ESP32 client provisioning and automated certificate
+enrollment/rotation are not implemented.

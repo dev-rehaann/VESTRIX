@@ -11,6 +11,7 @@ from filelock import FileLock
 from ._format import (
     canonical_json_bytes,
     hash_unsigned_record,
+    record_format_version,
     validate_event,
 )
 from ._store import StoreError, chain_tip
@@ -57,7 +58,9 @@ def log_event(event: dict[str, Any], signer: Signer) -> dict[str, Any]:
 
     with lock:
         try:
-            seq, previous_hash = chain_tip(store_path)
+            seq, previous_hash = chain_tip(
+                store_path, record_format_version(event_fields)
+            )
         except StoreError as exc:
             raise AppendError(f"refusing to append to an invalid chain: {exc}") from exc
 

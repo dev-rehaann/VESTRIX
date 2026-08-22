@@ -26,7 +26,7 @@ from forensics.keys import (
     load_private_key,
     load_public_key,
 )
-from forensics.logger import log_event
+from forensics.logger import AppendError, log_event
 
 EventFactory = Callable[[int], dict[str, Any]]
 
@@ -43,6 +43,8 @@ def _process_writer(store_path: str, key_path: str, writer_id: int, count: int) 
         digest = f"{unique:064x}"
         log_event(
             {
+                "format_version": 2,
+                "event_type": "classification_decision",
                 "ts_utc": f"2026-07-13T13:00:{offset % 60:02d}Z",
                 "node_id": f"writer-{writer_id}",
                 "raw_csi_hash": digest,
@@ -59,6 +61,8 @@ def _process_writer(store_path: str, key_path: str, writer_id: int, count: int) 
 
 def test_interoperability_vector_matches_specification() -> None:
     unsigned = {
+        "format_version": 2,
+        "event_type": "classification_decision",
         "seq": 0,
         "ts_utc": "2026-07-13T12:00:00Z",
         "node_id": "node-01",
@@ -71,21 +75,24 @@ def test_interoperability_vector_matches_specification() -> None:
         "top_shap": [],
         "prev_hash": "0" * 64,
     }
-    expected_hash = "ef5d7fe2153bd2653b9e8b2d19044498dfe07016a479a2c831d7e63c774777e8"
+    expected_hash = "a3cf276f603ad38d4c36c6319a47f1aaf618ace6c00a5da65d33cbd3caaa6efb"
     public_key = Ed25519PublicKey.from_public_bytes(
         bytes.fromhex(
             "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
         )
     )
     signature = bytes.fromhex(
-        "872e9ac9e8f2c0fb3473ecfc85d852a622460ae3a9718a35376f21eaa16c547b"
-        "6a35fb9633b8501b982cb7ab535631ad50ab9b7b58ed3d873a896b059318650f"
+        "e24926670ba994607ddabd50de2506d4e916ace4f35cc470e545015f512262d91"
+        "22baf4e44a5db6ca5923f18ee2be9286d6f840bc8310fd882dd24fedafdd00d"
     )
 
     record_bytes, record_hash = hash_unsigned_record(unsigned)
 
     assert record_hash == expected_hash
-    assert record_bytes.startswith(b'{"class":"normal","confidence":0.875,')
+    assert record_bytes.startswith(
+        b'{"class":"normal","confidence":0.875,'
+        b'"event_type":"classification_decision",'
+    )
     assert record_bytes.endswith(b'"ts_utc":"2026-07-13T12:00:00Z"}')
     public_key.verify(signature, record_bytes)
 
@@ -96,30 +103,30 @@ def test_interoperability_vector_matches_specification() -> None:
         (
             1.0,
             "1.0",
-            "427c3016848a90a8d4219a137b486fef785361379e5fbf1864451be59b4e67a0",
-            "1587c4fe5d1499e72b931e8989d481b6d071e56506798e4f0bf9f3df60497d35"
-            "ae95d5b8bb6caa963c7ed285430ef021eb103a3b7675b08dbb9a271f7924480b",
+            "1fb4432bfe63a9cf6b54e8ae416ec5d11bd87d6669b527d8c801e54500c4287f",
+            "e2a179bc96914aecd5b680659f3158e6067adb64fb20a286a9690de84c56df71"
+            "41ee3e3d1681d1c129a3f92685c1023baf04f642fbdfcb3aefdbf9bd9ef63f03",
         ),
         (
             0.9532,
             "0.9532",
-            "db55f077ce463a4ff1015aba74eadd3c5fd6ed31d78f0b77587c7b464f7872ed",
-            "e8eadc6abfdd5cb34d2c5445a0083dbcd44bfb5e6cd11814d9a9ca814b0b7fbd"
-            "1b20d0368b7b57b51565eb620c0f5dd531c6f689ffff791f5ec3457fddd0340b",
+            "5d6c9cc40f8db9dcf9984ce87cc7889eec0e0694426d0a3d20e97efaa739afc7",
+            "b61ad135f9ea5fa3894646c74b4f6b6c410daa10bc7c47feb1a8a288b9bedf6e"
+            "fcbd93ce8291c798048899f0a428123ef9acc6c4838bce1372c9978705012c04",
         ),
         (
             0.1 + 0.2,
             "0.30000000000000004",
-            "3aa30e8f2ae3dbf23a617238837d97363be4aef9c9ff99a44d4c5ac44ca233d1",
-            "e1b7ac82d66bfe177c1ba65a77b21ffde25e9e31d0d13075711df1256a85e940"
-            "bfcb62ee7602dda55ab0b58c2e532c9537188dc8f168a7d20cdbecbc08926001",
+            "576598c9ed876b0d040e3d1149883994d0f7e4f1f7800605d9d2552237e72ab6",
+            "33344ebde2b8cb80741e9e74e64c26342be691fb1924c0389ba802903d473b09"
+            "49c54a91f837534881386f6e21293ccac5ade1764542c584eb1ae6ccc888ff0b",
         ),
         (
             0.00001,
             "1e-05",
-            "10869621de6d71b59d6a112924e22ae7c152b3247e87695730300ba0bd7c8d27",
-            "5c84aee62bd7bcf98dfe7e9c11bbdafd214869f8e142f6cd340910a67674d8a7c"
-            "c1f1691d8b11c09d2d6a9ecfc185300fc0e5f2c6904e2e3f0c346e180b3a808",
+            "e6019ec3fc79d8c4e22ae378cdd5a8a1753f6bbb36ac847959e34031fae083cf",
+            "4545cf6255c52fe1a8ea9849621ac8c3a812570534057681227d212b2274535e"
+            "0cbea61e30c8565d695fd9308a155093e546d67b81039a21bf9fc4f5edc53d0a",
         ),
     ],
 )
@@ -130,6 +137,8 @@ def test_binary64_interoperability_vectors_match_specification(
     expected_signature: str,
 ) -> None:
     unsigned = {
+        "format_version": 2,
+        "event_type": "classification_decision",
         "seq": 0,
         "ts_utc": "2026-07-13T12:00:00Z",
         "node_id": "node-01",
@@ -173,6 +182,86 @@ def test_valid_chain_passes_verification(
 
     assert result.records_verified == 4
     assert result.tip_hash == records[-1]["record_hash"]
+
+
+def test_v2_ingestion_and_classification_records_share_one_valid_chain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_factory: EventFactory,
+) -> None:
+    store = tmp_path / "chain.jsonl"
+    _configure_store(monkeypatch, store)
+    signer = generate_signing_key()
+    ingestion = {
+        "format_version": 2,
+        "event_type": "ingestion_accepted",
+        "ts_utc": "2026-07-13T12:00:00Z",
+        "node_id": "node-01",
+        "raw_csi_hash": "1" * 64,
+        "collector_schema_version": "0.1",
+        "collector_sequence_number": 42,
+    }
+
+    accepted = log_event(ingestion, signer)
+    classified = log_event(event_factory(1), signer)
+    result = verify_chain(store, signer.public_key())
+
+    assert result.records_verified == 2
+    assert accepted["event_type"] == "ingestion_accepted"
+    assert not {
+        "features_hash",
+        "model_id",
+        "model_config_hash",
+        "class",
+        "confidence",
+        "top_shap",
+    } & accepted.keys()
+    assert classified["event_type"] == "classification_decision"
+    assert classified["prev_hash"] == accepted["record_hash"]
+
+
+def test_legacy_v1_record_remains_verifiable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = tmp_path / "chain.jsonl"
+    _configure_store(monkeypatch, store)
+    signer = generate_signing_key()
+    legacy_event = {
+        "ts_utc": "2026-07-13T12:00:00Z",
+        "node_id": "node-01",
+        "raw_csi_hash": "1" * 64,
+        "features_hash": "2" * 64,
+        "model_id": "model-v1",
+        "model_config_hash": "3" * 64,
+        "class": "normal",
+        "confidence": 0.875,
+        "top_shap": [],
+    }
+
+    record = log_event(legacy_event, signer)
+
+    assert "format_version" not in record
+    assert verify_chain(store, signer.public_key()).records_verified == 1
+
+
+def test_writer_refuses_to_mix_v1_and_v2_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_factory: EventFactory,
+) -> None:
+    store = tmp_path / "chain.jsonl"
+    _configure_store(monkeypatch, store)
+    signer = generate_signing_key()
+    legacy_event = dict(event_factory(0))
+    legacy_event.pop("format_version")
+    legacy_event.pop("event_type")
+    log_event(legacy_event, signer)
+
+    with pytest.raises(AppendError, match="different format version"):
+        log_event(event_factory(1), signer)
+
+    assert verify_chain(store, signer.public_key()).records_verified == 1
 
 
 def test_every_single_byte_flip_in_historical_record_is_detected(

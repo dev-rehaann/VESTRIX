@@ -173,7 +173,7 @@ integrity and documented handling part of a defensible forensic process
 |---|---|---|
 | `IMPLEMENTED` | Each canonical JSONL record contains a sequence number, the previous record hash, a SHA-256 `record_hash`, and an Ed25519 signature over the canonical record bytes. | Modification, insertion, reordering, or forgery without the signing key causes hash, linkage, sequence, canonicalization, or signature verification to fail. |
 | `IMPLEMENTED` | The Python logger validates the existing chain before append and serializes appends under a shared file lock. | Reduces accidental or concurrent chain corruption at the supported append interface. It does not make the underlying file write-once. |
-| `IMPLEMENTED` | After authentication, payload validation, identity binding, and anti-replay checks, the default collector adapter maps each accepted event to the version-1 collector-ingest profile and durably appends it with the configured Ed25519 key. The collector rejects the event if append fails. | Prevents the collector from acknowledging accepted evidence that was not signed and durably appended. |
+| `IMPLEMENTED` | After authentication, payload validation, identity binding, and anti-replay checks, the default collector adapter writes a chain-format-v2 `ingestion_accepted` record and durably appends it with the configured Ed25519 key. The collector rejects the event if append fails. | Prevents the collector from acknowledging accepted evidence that was not signed and durably appended, while structurally separating transport acceptance from an ML decision. |
 | `IMPLEMENTED` | The independent Rust `vestrix-verify` CLI shares no collector or Python forensics code and validates UTF-8/JSON form, the exact schema, canonical bytes, sequence continuity, hash linkage, SHA-256 hashes, and Ed25519 signatures. | Provides an independent, read-only check of the records that are present. |
 | `IMPLEMENTED` | The Python OpenTimestamps interface can snapshot a chain tip and write a backend receipt; the Rust verifier can inspect a limited offline proof subset and intentionally refuses to report full Bitcoin-anchor success. | Provides fail-closed scaffolding and partial proof binding without overstating timestamp assurance. |
 | `PLANNED` | A pinned production OpenTimestamps submission client and complete verification against an independently trusted Bitcoin best chain. | Intended to bind selected chain tips to an external time source and make later history replacement or truncation detectable relative to a retained checkpoint. |
@@ -209,12 +209,15 @@ integrity and documented handling part of a defensible forensic process
   payload, identity-mismatch, and replay rejections remain structured collector
   operational logs; they are not signed chain records and therefore do not have the
   chain's tamper-evidence properties.
-- The collector-ingest profile is a transport-acceptance record, not an ML result.
-  It maps `csi_window_sha256` to `raw_csi_hash`, uses the empty-content SHA-256 for
-  unavailable features, identifies the adapter in the model fields, records the
-  acceptance decision with confidence `1.0`, and preserves collector schema and
-  sequence metadata in `top_shap`. The sensor-supplied timestamp is recorded but is
-  not independently verified by the collector.
+- Chain-format-v2 `ingestion_accepted` records contain `event_type`, the mapped
+  `raw_csi_hash`, `collector_schema_version`, and `collector_sequence_number`.
+  They structurally exclude `features_hash`, `model_id`, `model_config_hash`,
+  `class`, `confidence`, and `top_shap`; those fields are valid only on a
+  `classification_decision`. The sensor-supplied timestamp is recorded but is not
+  independently verified by the collector.
+- Version 1 has no in-record version or event-type discriminator. The current
+  Python and Rust verifiers retain compatibility with unmixed historical v1
+  chains, but v1 and v2 records cannot be mixed in one chain.
 
 ## 4. Alert suppression — attacker attempts to suppress, delay, or interfere with alert delivery
 

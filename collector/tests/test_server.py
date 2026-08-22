@@ -144,8 +144,17 @@ def test_default_adapter_appends_verifiable_accepted_event(
     assert response["status"] == "accepted"
     assert verify_chain(store, public_key).records_verified == 1
     assert record["raw_csi_hash"] == _payload()["csi_window_sha256"]
-    assert record["class"] == "collector_event_accepted"
-    assert record["top_shap"]["collector_sequence_number"] == 1
+    assert record["format_version"] == 2
+    assert record["event_type"] == "ingestion_accepted"
+    assert record["collector_sequence_number"] == 1
+    assert not {
+        "features_hash",
+        "model_id",
+        "model_config_hash",
+        "class",
+        "confidence",
+        "top_shap",
+    } & record.keys()
 
 
 def test_default_adapter_chains_two_accepted_events(
