@@ -177,6 +177,7 @@ integrity and documented handling part of a defensible forensic process
 |---|---|---|
 | `IMPLEMENTED` | Each canonical JSONL record contains a sequence number, the previous record hash, a SHA-256 `record_hash`, and an Ed25519 signature over the canonical record bytes. | Modification, insertion, reordering, or forgery without the signing key causes hash, linkage, sequence, canonicalization, or signature verification to fail. |
 | `IMPLEMENTED` | The Python logger validates the existing chain before append and serializes appends under a shared file lock. | Reduces accidental or concurrent chain corruption at the supported append interface. It does not make the underlying file write-once. |
+| `IMPLEMENTED` | After authentication, payload validation, identity binding, and anti-replay checks, the default collector adapter writes a chain-format-v2 `ingestion_accepted` record and durably appends it with the configured Ed25519 key. The collector rejects the event if append fails. | Prevents the collector from acknowledging accepted evidence that was not signed and durably appended, while structurally separating transport acceptance from an ML decision. |
 | `IMPLEMENTED` | The independent Rust `vestrix-verify` CLI shares no collector or Python forensics code and validates UTF-8/JSON form, the exact schema, canonical bytes, sequence continuity, hash linkage, SHA-256 hashes, and Ed25519 signatures. | Provides an independent, read-only check of the records that are present. |
 | `IMPLEMENTED` | The Python OpenTimestamps interface can snapshot a chain tip and write a backend receipt; the Rust verifier can inspect a limited offline proof subset and intentionally refuses to report full Bitcoin-anchor success. | Provides fail-closed scaffolding and partial proof binding without overstating timestamp assurance. |
 | `PLANNED` | A pinned production OpenTimestamps submission client and complete verification against an independently trusted Bitcoin best chain. | Intended to bind selected chain tips to an external time source and make later history replacement or truncation detectable relative to a retained checkpoint. |
@@ -208,9 +209,19 @@ integrity and documented handling part of a defensible forensic process
 - Signing-key custody, filesystem authorization, backup retention, export of trusted
   chain tips, and evidence-chain-of-custody procedures remain operator
   responsibilities.
-- The collector-to-forensics adapter is currently a no-op boundary. The logger is
-  implemented as a separate component, but accepted collector events are not yet
-  connected to it by the default collector configuration.
+- Only accepted events enter the signed forensic chain. TLS, enrollment, malformed
+  payload, identity-mismatch, and replay rejections remain structured collector
+  operational logs; they are not signed chain records and therefore do not have the
+  chain's tamper-evidence properties.
+- Chain-format-v2 `ingestion_accepted` records contain `event_type`, the mapped
+  `raw_csi_hash`, `collector_schema_version`, and `collector_sequence_number`.
+  They structurally exclude `features_hash`, `model_id`, `model_config_hash`,
+  `class`, `confidence`, and `top_shap`; those fields are valid only on a
+  `classification_decision`. The sensor-supplied timestamp is recorded but is not
+  independently verified by the collector.
+- Version 1 has no in-record version or event-type discriminator. The current
+  Python and Rust verifiers retain compatibility with unmixed historical v1
+  chains, but v1 and v2 records cannot be mixed in one chain.
 
 ## 4. Alert suppression — attacker attempts to suppress, delay, or interfere with alert delivery
 
@@ -231,7 +242,8 @@ misinterpreted as an absence of intrusion rather than a failed or suppressed sen
 |---|---|---|
 | `IMPLEMENTED` | The canonical alert mapper produces validated Wazuh JSON and OCSF Detection Finding events, and the Wazuh decoder/rules generate defined alerts for supported intrusion and `sensor_tamper` events. | Provides deterministic downstream interpretation for an event that reaches the integration. It does not guarantee transport or operator notification. |
 | `IMPLEMENTED` | The Wazuh integration includes a correlation rule for a Vestrix intrusion following a supported authentication anomaly. | Can raise the severity of a received alert when corroborating telemetry is present. It does not detect a missing Vestrix event. |
-| `PLANNED` | Connect authenticated collector handoff to the signed logger and canonical SOC event path. | Intended to preserve accepted evidence and feed both SOC mappings from the same validated event. The current collector adapter is a no-op, so this path is not end to end. |
+| `IMPLEMENTED` | Connect authenticated collector handoff to the signed logger. | Preserves each accepted collector event in the hash-chained, Ed25519-signed store and fails closed if the append cannot complete. |
+| `PLANNED` | Connect the processing/ML output to the canonical SOC event path. | Intended to feed both SOC mappings from the same validated classified event. This path is not end to end. |
 | `PLANNED` | Sensor heartbeat/liveness records and missed-heartbeat alerts. | Intended to make loss of expected telemetry observable instead of treating silence as normal operation. |
 | `PLANNED` | Correlation of a sensor-tamper or liveness failure with missing or delayed alert traffic. | Intended to identify combined physical interference and alert-path impairment. No such correlation rule is currently shipped. |
 
@@ -252,9 +264,9 @@ misinterpreted as an absence of intrusion rather than a failed or suppressed sen
   implemented. Silence is not currently a reliable security signal.
 - The Wazuh and OCSF components map and classify events; they do not deliver them to
   an operator or prove that an operator received them.
-- No in-repository dispatcher currently connects collector ingest to the signed
-  logger, canonical alert mapper, and Wazuh/OCSF destinations as one operational
-  path.
+- No in-repository dispatcher currently connects collector ingest through ML to the
+  canonical alert mapper and Wazuh/OCSF destinations as one operational path. The
+  direct accepted-event collector-to-signed-logger path is implemented.
 - mTLS provides peer authentication and transport integrity, not availability. It
   does not prevent connection exhaustion, network outage, deliberate packet loss,
   or loss of sensor power.

@@ -12,6 +12,7 @@ from ._format import (
     RecordFormatError,
     canonical_json_bytes,
     hash_unsigned_record,
+    record_format_version,
     validate_stored_record,
 )
 
@@ -29,6 +30,7 @@ def iter_validated_records(path: Path) -> Iterator[tuple[int, dict[str, Any], by
     """Yield structurally and cryptographically linked records from ``path``."""
     expected_seq = 0
     expected_prev_hash = GENESIS_PREV_HASH
+    expected_format_version: int | None = None
 
     try:
         store = path.open("rb")
@@ -47,6 +49,12 @@ def iter_validated_records(path: Path) -> Iterator[tuple[int, dict[str, Any], by
                 record = validate_stored_record(parsed)
             except (json.JSONDecodeError, UnicodeDecodeError, RecordFormatError) as exc:
                 raise StoreError(line_number, f"invalid record: {exc}") from exc
+
+            format_version = record_format_version(record)
+            if expected_format_version is None:
+                expected_format_version = format_version
+            elif format_version != expected_format_version:
+                raise StoreError(line_number, "chain mixes format versions")
 
             if canonical_json_bytes(record) != line:
                 raise StoreError(line_number, "stored JSON is not in canonical form")
@@ -73,11 +81,18 @@ def iter_validated_records(path: Path) -> Iterator[tuple[int, dict[str, Any], by
             expected_prev_hash = record["record_hash"]
 
 
-def chain_tip(path: Path) -> tuple[int, str]:
+def chain_tip(
+    path: Path, required_format_version: int | None = None
+) -> tuple[int, str]:
     """Return the next sequence and preceding hash after validating the store."""
     next_seq = 0
     previous_hash = GENESIS_PREV_HASH
-    for _, record, _ in iter_validated_records(path):
+    for line_number, record, _ in iter_validated_records(path):
+        if (
+            required_format_version is not None
+            and record_format_version(record) != required_format_version
+        ):
+            raise StoreError(line_number, "cannot append a different format version")
         next_seq = record["seq"] + 1
         previous_hash = record["record_hash"]
     return next_seq, previous_hash

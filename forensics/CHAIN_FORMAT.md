@@ -1,29 +1,83 @@
-# Vestrix forensic chain format, version 1
+# Vestrix forensic chain format, version 2
 
-This document is the normative, byte-level specification for the first Vestrix
-forensic chain format. A verifier does not need any Vestrix writer code to
-implement it. There is no version field in version 1; deployments must associate
-this specification with the chain out of band.
+This document is the normative, byte-level specification for Vestrix forensic
+chain format version 2. A verifier does not need any Vestrix writer code to
+implement it. Version 2 adds an in-record `format_version` and an `event_type`
+discriminator so transport acceptance cannot be mistaken for an ML decision.
+
+Version 1 remains defined by repository revisions before this version-2 change.
+It has no version field and requires all six ML-specific fields in every record.
+Current verifiers accept an unmixed legacy version-1 chain, but one chain must not
+mix version-1 and version-2 records. A deployment upgrading from version 1 must
+close the old chain segment and start a new version-2 store; the writer rejects an
+attempt to append version 2 to an existing version-1 chain.
 
 ## Record schema
 
-Every JSON record has exactly these fields and no others:
+Every version-2 JSON record has exactly one of the two schemas below. Fields that
+do not apply to an event type are absent, not null or filled with sentinels.
+
+### Common event fields
 
 | Field | JSON type | Rule |
 |---|---|---|
-| `seq` | integer | Zero-based sequence, in `0..2^63-1` |
+| `format_version` | integer | Exactly `2` |
+| `event_type` | string | Exactly `ingestion_accepted` or `classification_decision` |
 | `ts_utc` | string | RFC 3339 UTC timestamp in `YYYY-MM-DDTHH:MM:SS[.fraction]Z` form |
 | `node_id` | string | Non-empty logger/node identifier |
 | `raw_csi_hash` | string | 64 lowercase hexadecimal characters |
+
+### `ingestion_accepted` event fields
+
+These fields are required in addition to the common fields:
+
+| Field | JSON type | Rule |
+|---|---|---|
+| `collector_schema_version` | string | Non-empty collector payload-schema version |
+| `collector_sequence_number` | integer | Collector anti-replay sequence in `0..2^63-1` |
+
+The ML-specific fields below are forbidden on `ingestion_accepted` records.
+
+### `classification_decision` event fields
+
+These fields are required in addition to the common fields:
+
+| Field | JSON type | Rule |
+|---|---|---|
 | `features_hash` | string | 64 lowercase hexadecimal characters |
 | `model_id` | string | Non-empty model identifier |
 | `model_config_hash` | string | 64 lowercase hexadecimal characters |
 | `class` | string | Non-empty classification label |
 | `confidence` | number | Finite number in the closed interval `[0,1]`; booleans are not numbers |
 | `top_shap` | JSON value | JSON-compatible explanation data under the restrictions below |
+
+### Managed chain fields
+
+Every record of either event type also contains:
+
+| Field | JSON type | Rule |
+|---|---|---|
+| `seq` | integer | Zero-based forensic-chain sequence, in `0..2^63-1` |
 | `prev_hash` | string | Previous record's `record_hash`, or the genesis sentinel |
 | `record_hash` | string | SHA-256 digest specified below, as 64 lowercase hexadecimal characters |
 | `signature` | string | Ed25519 signature specified below, as 128 lowercase hexadecimal characters |
+
+For example, the caller-controlled portion of an accepted collector event is:
+
+```json
+{
+  "format_version": 2,
+  "event_type": "ingestion_accepted",
+  "ts_utc": "2026-07-13T12:00:00Z",
+  "node_id": "node-01",
+  "raw_csi_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "collector_schema_version": "0.1",
+  "collector_sequence_number": 42
+}
+```
+
+It contains no `features_hash`, `model_id`, `model_config_hash`, `class`,
+`confidence`, or `top_shap` because no classification has occurred.
 
 All strings must contain Unicode scalar values; unpaired UTF-16 surrogate code
 points are forbidden. `top_shap` can contain null, booleans, strings, arrays,
@@ -58,30 +112,46 @@ Consequently:
    normative Float Canonicalization section below. An implementation must not
    delegate this choice to an unspecified language-default formatter.
 
-For the unsigned object described below, the resulting top-level key order is:
+For an unsigned `ingestion_accepted` object, the resulting top-level key order is:
 
 ```text
-class, confidence, features_hash, model_config_hash, model_id, node_id,
-prev_hash, raw_csi_hash, seq, top_shap, ts_utc
+collector_schema_version, collector_sequence_number, event_type, format_version,
+node_id, prev_hash, raw_csi_hash, seq, ts_utc
 ```
 
-For the complete stored object, the top-level key order is:
+For a complete `ingestion_accepted` object:
 
 ```text
-class, confidence, features_hash, model_config_hash, model_id, node_id,
-prev_hash, raw_csi_hash, record_hash, seq, signature, top_shap, ts_utc
+collector_schema_version, collector_sequence_number, event_type, format_version,
+node_id, prev_hash, raw_csi_hash, record_hash, seq, signature, ts_utc
+```
+
+For an unsigned `classification_decision` object:
+
+```text
+class, confidence, event_type, features_hash, format_version, model_config_hash,
+model_id, node_id, prev_hash, raw_csi_hash, seq, top_shap, ts_utc
+```
+
+For a complete `classification_decision` object:
+
+```text
+class, confidence, event_type, features_hash, format_version, model_config_hash,
+model_id, node_id, prev_hash, raw_csi_hash, record_hash, seq, signature,
+top_shap, ts_utc
 ```
 
 ## Float Canonicalization
 
 This section is normative for every value represented as an IEEE 754 binary64,
-including a float-typed `confidence` and binary64 values nested in `top_shap`.
+including `classification_decision.confidence` and binary64 values nested in its
+`top_shap`.
 The canonicalizer receives the 64-bit binary64 value, not its source-code
 spelling or an independently recomputed mathematical value.
 
 ### Chosen representation and tradeoffs
 
-Chain format version 1 adopts **shortest round-trippable decimal JSON numbers**
+Chain format version 2 retains version 1's **shortest round-trippable decimal JSON numbers**
 (option (a)). The goal is the same as RFC 8785/JCS: one deterministic,
 human-readable decimal token that recovers the identical binary64 value. The
 fixed/scientific thresholds below deliberately retain the established CPython
@@ -95,10 +165,9 @@ schema, historical `record_bytes`, hashes, and signatures. Fixed precision
 (option (b)) is rejected because it either loses information or requires an
 application-specific scale that does not fit both CSI features and SHAP values.
 
-> **Maintainer sign-off required:** version 1 retains option (a) to avoid a
-> breaking format change. If hexadecimal binary64 is preferred, it must be
-> introduced as a new chain-format version; it cannot be substituted into
-> version 1.
+> **Maintainer sign-off required:** version 2 retains option (a). If hexadecimal
+> binary64 is preferred, it must be introduced as a later chain-format version;
+> it cannot be substituted into version 1 or version 2.
 
 ### Canonical form
 
@@ -152,6 +221,8 @@ binary64 bits `3fd3333333333334`; `confidence` has bits `3fda3d70a3d70a3d`.
 
 ```json
 {
+  "format_version": 2,
+  "event_type": "classification_decision",
   "seq": 0,
   "ts_utc": "2026-07-13T12:00:00Z",
   "node_id": "node-01",
@@ -170,7 +241,7 @@ Its canonical `record_bytes` are exactly the following ASCII/UTF-8 bytes, with
 no BOM and no trailing LF:
 
 ```text
-{"class":"intrusion","confidence":0.41,"features_hash":"2222222222222222222222222222222222222222222222222222222222222222","model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":0,"top_shap":[{"contribution":0.30000000000000004,"feature":"phase_variance"}],"ts_utc":"2026-07-13T12:00:00Z"}
+{"class":"intrusion","confidence":0.41,"event_type":"classification_decision","features_hash":"2222222222222222222222222222222222222222222222222222222222222222","format_version":2,"model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":0,"top_shap":[{"contribution":0.30000000000000004,"feature":"phase_variance"}],"ts_utc":"2026-07-13T12:00:00Z"}
 ```
 
 ### Float canonicalization test vectors
@@ -179,6 +250,9 @@ The `binary64 hex` column is the normative input and removes ambiguity caused
 by parsing decimal source text. The input label is explanatory. The versioned,
 machine-readable copy is
 [`tests/vectors/float_canonicalization.json`](../tests/vectors/float_canonicalization.json).
+These 25 scalar vectors are independent of the record schema and are unchanged
+from chain format version 1. Full-record hashes and signatures below changed
+because version-2 classification records add `format_version` and `event_type`.
 
 | Input label | Binary64 hex | Canonical token | Divergence covered |
 |---|---|---|---|
@@ -210,7 +284,7 @@ machine-readable copy is
 
 ### Integer-versus-float schema boundary
 
-Chain format version 1 does not pass JSON integers through float
+Chain format version 2, like version 1, does not pass JSON integers through float
 canonicalization. The signed-64-bit JSON integer `9007199254740993` is valid
 and emits exactly `9007199254740993`; only an explicit conversion to binary64
 rounds it to the vector above. Likewise, integer `1` emits `1`, binary64 `1.0`
@@ -234,10 +308,9 @@ For each event, perform these steps in order:
    record's `seq + 1`.
 2. Set genesis `prev_hash` to exactly 64 ASCII zero characters. Otherwise set it
    to the previous record's 64-character lowercase `record_hash`.
-3. Construct the **unsigned object** from exactly the eleven fields `seq`,
-   `ts_utc`, `node_id`, `raw_csi_hash`, `features_hash`, `model_id`,
-   `model_config_hash`, `class`, `confidence`, `top_shap`, and `prev_hash`.
-   Neither `record_hash` nor `signature` is present.
+3. Construct the **unsigned object** from the exact common, event-type-specific,
+   and managed unsigned fields defined above. Neither `record_hash` nor
+   `signature` is present. Inapplicable event-type fields must not be added.
 4. Canonically serialize the unsigned object. Call the resulting UTF-8 byte
    sequence `record_bytes`.
 5. Compute `SHA-256(record_bytes)` and encode its 32 bytes as lowercase hex. This
@@ -298,25 +371,25 @@ This genesis vector uses an Ed25519 test key. Its raw 32-byte public key is:
 The exact UTF-8 `record_bytes` (shown as text, with no trailing LF) are:
 
 ```json
-{"class":"normal","confidence":0.875,"features_hash":"2222222222222222222222222222222222222222222222222222222222222222","model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":0,"top_shap":[],"ts_utc":"2026-07-13T12:00:00Z"}
+{"class":"normal","confidence":0.875,"event_type":"classification_decision","features_hash":"2222222222222222222222222222222222222222222222222222222222222222","format_version":2,"model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","seq":0,"top_shap":[],"ts_utc":"2026-07-13T12:00:00Z"}
 ```
 
 Expected lowercase SHA-256:
 
 ```text
-ef5d7fe2153bd2653b9e8b2d19044498dfe07016a479a2c831d7e63c774777e8
+a3cf276f603ad38d4c36c6319a47f1aaf618ace6c00a5da65d33cbd3caaa6efb
 ```
 
 Expected lowercase Ed25519 signature:
 
 ```text
-872e9ac9e8f2c0fb3473ecfc85d852a622460ae3a9718a35376f21eaa16c547b6a35fb9633b8501b982cb7ab535631ad50ab9b7b58ed3d873a896b059318650f
+e24926670ba994607ddabd50de2506d4e916ace4f35cc470e545015f512262d9122baf4e44a5db6ca5923f18ee2be9286d6f840bc8310fd882dd24fedafdd00d
 ```
 
 The exact stored line is the following bytes plus one final `0x0a`:
 
 ```json
-{"class":"normal","confidence":0.875,"features_hash":"2222222222222222222222222222222222222222222222222222222222222222","model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","record_hash":"ef5d7fe2153bd2653b9e8b2d19044498dfe07016a479a2c831d7e63c774777e8","seq":0,"signature":"872e9ac9e8f2c0fb3473ecfc85d852a622460ae3a9718a35376f21eaa16c547b6a35fb9633b8501b982cb7ab535631ad50ab9b7b58ed3d873a896b059318650f","top_shap":[],"ts_utc":"2026-07-13T12:00:00Z"}
+{"class":"normal","confidence":0.875,"event_type":"classification_decision","features_hash":"2222222222222222222222222222222222222222222222222222222222222222","format_version":2,"model_config_hash":"3333333333333333333333333333333333333333333333333333333333333333","model_id":"model-v1","node_id":"node-01","prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","raw_csi_hash":"1111111111111111111111111111111111111111111111111111111111111111","record_hash":"a3cf276f603ad38d4c36c6319a47f1aaf618ace6c00a5da65d33cbd3caaa6efb","seq":0,"signature":"e24926670ba994607ddabd50de2506d4e916ace4f35cc470e545015f512262d9122baf4e44a5db6ca5923f18ee2be9286d6f840bc8310fd882dd24fedafdd00d","top_shap":[],"ts_utc":"2026-07-13T12:00:00Z"}
 ```
 
 ### Binary64 hash/signature regression vectors
@@ -332,10 +405,10 @@ No other byte changes.
 
 | Python source value | Canonical confidence token | Expected SHA-256 | Expected Ed25519 signature |
 |---|---|---|---|
-| `1.0` | `1.0` | `427c3016848a90a8d4219a137b486fef785361379e5fbf1864451be59b4e67a0` | `1587c4fe5d1499e72b931e8989d481b6d071e56506798e4f0bf9f3df60497d35ae95d5b8bb6caa963c7ed285430ef021eb103a3b7675b08dbb9a271f7924480b` |
-| `0.9532` | `0.9532` | `db55f077ce463a4ff1015aba74eadd3c5fd6ed31d78f0b77587c7b464f7872ed` | `e8eadc6abfdd5cb34d2c5445a0083dbcd44bfb5e6cd11814d9a9ca814b0b7fbd1b20d0368b7b57b51565eb620c0f5dd531c6f689ffff791f5ec3457fddd0340b` |
-| `0.1 + 0.2` | `0.30000000000000004` | `3aa30e8f2ae3dbf23a617238837d97363be4aef9c9ff99a44d4c5ac44ca233d1` | `e1b7ac82d66bfe177c1ba65a77b21ffde25e9e31d0d13075711df1256a85e940bfcb62ee7602dda55ab0b58c2e532c9537188dc8f168a7d20cdbecbc08926001` |
-| `0.00001` | `1e-05` | `10869621de6d71b59d6a112924e22ae7c152b3247e87695730300ba0bd7c8d27` | `5c84aee62bd7bcf98dfe7e9c11bbdafd214869f8e142f6cd340910a67674d8a7cc1f1691d8b11c09d2d6a9ecfc185300fc0e5f2c6904e2e3f0c346e180b3a808` |
+| `1.0` | `1.0` | `1fb4432bfe63a9cf6b54e8ae416ec5d11bd87d6669b527d8c801e54500c4287f` | `e2a179bc96914aecd5b680659f3158e6067adb64fb20a286a9690de84c56df7141ee3e3d1681d1c129a3f92685c1023baf04f642fbdfcb3aefdbf9bd9ef63f03` |
+| `0.9532` | `0.9532` | `5d6c9cc40f8db9dcf9984ce87cc7889eec0e0694426d0a3d20e97efaa739afc7` | `b61ad135f9ea5fa3894646c74b4f6b6c410daa10bc7c47feb1a8a288b9bedf6efcbd93ce8291c798048899f0a428123ef9acc6c4838bce1372c9978705012c04` |
+| `0.1 + 0.2` | `0.30000000000000004` | `576598c9ed876b0d040e3d1149883994d0f7e4f1f7800605d9d2552237e72ab6` | `33344ebde2b8cb80741e9e74e64c26342be691fb1924c0389ba802903d473b0949c54a91f837534881386f6e21293ccac5ade1764542c584eb1ae6ccc888ff0b` |
+| `0.00001` | `1e-05` | `e6019ec3fc79d8c4e22ae378cdd5a8a1753f6bbb36ac847959e34031fae083cf` | `4545cf6255c52fe1a8ea9849621ac8c3a812570534057681227d212b2274535e0cbea61e30c8565d695fd9308a155093e546d67b81039a21bf9fc4f5edc53d0a` |
 
 The complete scalar vector set appears in Float Canonicalization above.
 Negative finite binary64 values are valid inside `top_shap` even though values

@@ -17,6 +17,9 @@ from typing import Any
 import pytest
 import yaml
 from conftest import CertificateBundle, Identity, write_crl
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from forensics import verify_chain
+from forensics.keys import generate_signing_key, save_private_key
 
 from vestrix_collector.config import CollectorConfig, ServerConfig, TLSConfig
 from vestrix_collector.models import CSIEvent
@@ -76,7 +79,7 @@ def _config(tmp_path: Path, certificates: CertificateBundle) -> CollectorConfig:
 
 async def _with_server(
     config: CollectorConfig,
-    event_logger: Callable[[CSIEvent], None],
+    event_logger: Callable[[CSIEvent], None] | None,
     operation: Callable[[CollectorServer], Any],
 ) -> Any:
     server = CollectorServer(config, event_logger=event_logger)
@@ -85,6 +88,18 @@ async def _with_server(
         return await operation(server)
     finally:
         await server.close()
+
+
+def _configure_forensics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Ed25519PublicKey]:
+    store = tmp_path / "chain.jsonl"
+    private_key = tmp_path / "forensics-private.pem"
+    signer = generate_signing_key()
+    save_private_key(signer, private_key)
+    monkeypatch.setenv("VESTRIX_FORENSICS_STORE", str(store))
+    monkeypatch.setenv("VESTRIX_FORENSICS_PRIVATE_KEY", str(private_key))
+    return store, signer.public_key()
 
 
 def test_valid_certificate_and_enrolled_node_is_accepted(
@@ -112,10 +127,155 @@ def test_valid_certificate_and_enrolled_node_is_accepted(
     assert received == [_payload()]
 
 
-def test_revoked_enrolled_certificate_is_rejected_during_tls(
-    tmp_path: Path, certificates: CertificateBundle
+def test_default_adapter_appends_verifiable_accepted_event(
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    received: list[CSIEvent] = []
+    store, public_key = _configure_forensics(tmp_path, monkeypatch)
+
+    async def scenario(server: CollectorServer) -> dict[str, str]:
+        return await asyncio.to_thread(
+            _send_event,
+            server.port,
+            certificates.ca_cert,
+            certificates.enrolled_node,
+            _payload(),
+        )
+
+    response = asyncio.run(
+        _with_server(_config(tmp_path, certificates), None, scenario)
+    )
+    record = json.loads(store.read_text(encoding="utf-8"))
+
+    assert response["status"] == "accepted"
+    assert verify_chain(store, public_key).records_verified == 1
+    assert record["raw_csi_hash"] == _payload()["csi_window_sha256"]
+    assert record["format_version"] == 2
+    assert record["event_type"] == "ingestion_accepted"
+    assert record["collector_sequence_number"] == 1
+    assert not {
+        "features_hash",
+        "model_id",
+        "model_config_hash",
+        "class",
+        "confidence",
+        "top_shap",
+    } & record.keys()
+
+
+def test_default_adapter_chains_two_accepted_events(
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, public_key = _configure_forensics(tmp_path, monkeypatch)
+
+    async def scenario(server: CollectorServer) -> list[dict[str, str]]:
+        return [
+            await asyncio.to_thread(
+                _send_event,
+                server.port,
+                certificates.ca_cert,
+                certificates.enrolled_node,
+                _payload(sequence_number),
+            )
+            for sequence_number in (1, 2)
+        ]
+
+    responses = asyncio.run(
+        _with_server(_config(tmp_path, certificates), None, scenario)
+    )
+    records = [
+        json.loads(line)
+        for line in store.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert [response["status"] for response in responses] == ["accepted", "accepted"]
+    assert verify_chain(store, public_key).records_verified == 2
+    assert records[1]["prev_hash"] == records[0]["record_hash"]
+
+
+def test_rejected_replay_is_not_appended_to_forensic_chain(
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store, public_key = _configure_forensics(tmp_path, monkeypatch)
+    caplog.set_level(logging.INFO, logger="vestrix_collector.decisions")
+
+    async def scenario(server: CollectorServer) -> list[dict[str, str]]:
+        return [
+            await asyncio.to_thread(
+                _send_event,
+                server.port,
+                certificates.ca_cert,
+                certificates.enrolled_node,
+                _payload(),
+            )
+            for _ in range(2)
+        ]
+
+    responses = asyncio.run(
+        _with_server(_config(tmp_path, certificates), None, scenario)
+    )
+
+    assert responses[0]["status"] == "accepted"
+    assert responses[1] == {
+        "status": "rejected",
+        "reason": "replayed_or_out_of_order_sequence",
+    }
+    assert verify_chain(store, public_key).records_verified == 1
+    assert any(
+        getattr(record, "decision_fields", {}).get("reason")
+        == "replayed_or_out_of_order_sequence"
+        for record in caplog.records
+    )
+
+
+def test_forensic_append_failure_rejects_event(
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store, _ = _configure_forensics(tmp_path, monkeypatch)
+    caplog.set_level(logging.INFO, logger="vestrix_collector.decisions")
+    blocked_parent = tmp_path / "blocked"
+    blocked_parent.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setenv("VESTRIX_FORENSICS_STORE", str(blocked_parent / store.name))
+
+    async def scenario(server: CollectorServer) -> dict[str, str]:
+        return await asyncio.to_thread(
+            _send_event,
+            server.port,
+            certificates.ca_cert,
+            certificates.enrolled_node,
+            _payload(),
+        )
+
+    response = asyncio.run(
+        _with_server(_config(tmp_path, certificates), None, scenario)
+    )
+
+    assert response == {"status": "rejected", "reason": "forensics_handoff_failed"}
+    assert not (blocked_parent / store.name).exists()
+    assert any(
+        getattr(record, "decision_fields", {}).get("reason")
+        == "forensics_handoff_failed"
+        for record in caplog.records
+    )
+
+
+def test_revoked_enrolled_certificate_is_structured_only_not_forensically_chained(
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store, _ = _configure_forensics(tmp_path, monkeypatch)
+    caplog.set_level(logging.INFO, logger="vestrix_collector.decisions")
     write_crl(certificates, (certificates.enrolled_node,))
 
     async def scenario(server: CollectorServer) -> None:
@@ -127,11 +287,24 @@ def test_revoked_enrolled_certificate_is_rejected_during_tls(
                 certificates.enrolled_node,
                 _payload(),
             )
+        for _ in range(100):
+            if any(
+                getattr(record, "decision_fields", {}).get("reason")
+                == "tls_handshake_failed"
+                for record in caplog.records
+            ):
+                return
+            await asyncio.sleep(0.01)
+        pytest.fail("server did not emit a TLS rejection decision")
 
-    asyncio.run(
-        _with_server(_config(tmp_path, certificates), received.append, scenario)
+    asyncio.run(_with_server(_config(tmp_path, certificates), None, scenario))
+
+    assert not store.exists()
+    assert any(
+        getattr(record, "decision_fields", {}).get("reason")
+        == "tls_handshake_failed"
+        for record in caplog.records
     )
-    assert received == []
 
 
 def test_crl_reload_rejects_revoked_node_without_restart(
@@ -196,8 +369,11 @@ def test_allowlist_reload_rejects_removed_node_without_restart(
 
 @pytest.mark.skipif(sys.platform != "linux", reason="requires POSIX SIGHUP")
 def test_real_sighup_reloads_crl_in_collector_process(
-    tmp_path: Path, certificates: CertificateBundle
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    store, public_key = _configure_forensics(tmp_path, monkeypatch)
     with socket.socket() as reserved_socket:
         reserved_socket.bind(("127.0.0.1", 0))
         port = reserved_socket.getsockname()[1]
@@ -273,6 +449,9 @@ def test_real_sighup_reloads_crl_in_collector_process(
             sequence_number += 1
             time.sleep(0.05)
         assert process.poll() is None
+        assert (
+            verify_chain(store, public_key).records_verified == sequence_number - 1
+        )
     finally:
         process.terminate()
         try:
@@ -316,7 +495,7 @@ def test_self_signed_client_certificate_is_rejected_during_tls(
     caplog.set_level(logging.INFO, logger="vestrix_collector.decisions")
 
     async def scenario(server: CollectorServer) -> None:
-        with pytest.raises(OSError):
+        with pytest.raises(ssl.SSLError):
             await asyncio.to_thread(
                 _send_event,
                 server.port,

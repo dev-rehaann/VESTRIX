@@ -24,6 +24,7 @@ jobs:
           pip install ruff==0.15.21 pytest==9.1.1
           pip install -r collector/requirements.txt
           pip install -r forensics/requirements.txt
+          pip install -e ./forensics
           pip install -e ./collector
           pip install -e ./soc-integration
 

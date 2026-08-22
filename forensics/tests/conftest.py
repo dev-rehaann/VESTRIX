@@ -14,6 +14,8 @@ def event_factory() -> Callable[[int], dict[str, Any]]:
             return hashlib.sha256(f"{label}-{index}".encode()).hexdigest()
 
         return {
+            "format_version": 2,
+            "event_type": "classification_decision",
             "ts_utc": f"2026-07-13T12:00:{index % 60:02d}Z",
             "node_id": f"node-{index % 3}",
             "raw_csi_hash": digest("raw"),

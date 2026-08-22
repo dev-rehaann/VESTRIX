@@ -1,21 +1,32 @@
-"""Temporary boundary to the separately developed forensic event logger."""
+"""Collector adapter for the signed forensic event logger."""
 
 from __future__ import annotations
 
+import os
+
+from forensics import log_event as append_forensic_event
+from forensics.keys import load_private_key
+
 from .models import CSIEvent
+
+SIGNING_KEY_PATH_ENV = "VESTRIX_FORENSICS_PRIVATE_KEY"
 
 
 def log_event(event: CSIEvent) -> None:
-    """Hand an authenticated raw event to the forensic logging subsystem.
+    """Durably append one authenticated collector event to the forensic chain."""
+    key_path = os.environ.get(SIGNING_KEY_PATH_ENV)
+    if not key_path:
+        raise RuntimeError(f"{SIGNING_KEY_PATH_ENV} is not configured")
 
-    Integration contract for ``forensics/`` (must retain this exact signature):
-
-        def log_event(event: vestrix_collector.models.CSIEvent) -> None
-
-    The eventual implementation must raise an exception when durable handoff fails.
-    It owns hash chaining and external timestamp anchoring. The collector must never
-    sign or claim to verify ``timestamp_utc`` itself.
-    """
-    # TODO(forensics integration): replace this no-op with the separately built
-    # hash-chain logger. Hashing/signing deliberately does not belong here.
-    del event
+    append_forensic_event(
+        {
+            "format_version": 2,
+            "event_type": "ingestion_accepted",
+            "ts_utc": event["timestamp_utc"],
+            "node_id": event["node_id"],
+            "raw_csi_hash": event["csi_window_sha256"],
+            "collector_schema_version": event["schema_version"],
+            "collector_sequence_number": event["sequence_number"],
+        },
+        load_private_key(key_path),
+    )

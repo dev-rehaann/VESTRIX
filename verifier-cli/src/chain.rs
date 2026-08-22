@@ -18,7 +18,37 @@ use sha2::{Digest, Sha256};
 use crate::canonical;
 
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
-const FIELDS: [&str; 13] = [
+const V1_FIELDS: [&str; 13] = [
+    "seq",
+    "ts_utc",
+    "node_id",
+    "raw_csi_hash",
+    "features_hash",
+    "model_id",
+    "model_config_hash",
+    "class",
+    "confidence",
+    "top_shap",
+    "prev_hash",
+    "record_hash",
+    "signature",
+];
+const V2_INGESTION_FIELDS: [&str; 11] = [
+    "format_version",
+    "event_type",
+    "seq",
+    "ts_utc",
+    "node_id",
+    "raw_csi_hash",
+    "collector_schema_version",
+    "collector_sequence_number",
+    "prev_hash",
+    "record_hash",
+    "signature",
+];
+const V2_CLASSIFICATION_FIELDS: [&str; 15] = [
+    "format_version",
+    "event_type",
     "seq",
     "ts_utc",
     "node_id",
@@ -90,6 +120,7 @@ pub fn verify_reader<R: BufRead>(
     let mut expected_prev = GENESIS_HASH.to_owned();
     let mut line = Vec::new();
     let mut tip = None;
+    let mut chain_format_version = None;
 
     loop {
         line.clear();
@@ -114,7 +145,15 @@ pub fn verify_reader<R: BufRead>(
         let object = value
             .as_object()
             .ok_or_else(|| ChainError::at(expected_seq, "record is not a JSON object"))?;
-        validate_schema(object).map_err(|reason| ChainError::at(expected_seq, reason))?;
+        let format_version =
+            validate_schema(object).map_err(|reason| ChainError::at(expected_seq, reason))?;
+        if let Some(expected) = chain_format_version {
+            if format_version != expected {
+                return Err(ChainError::at(expected_seq, "chain mixes format versions"));
+            }
+        } else {
+            chain_format_version = Some(format_version);
+        }
 
         let canonical_complete = canonical::serialize(&value).map_err(|error| {
             ChainError::at(expected_seq, format!("cannot serialize JSON: {error}"))
@@ -184,8 +223,27 @@ pub fn verify_reader<R: BufRead>(
     })
 }
 
-fn validate_schema(object: &Map<String, Value>) -> Result<(), String> {
-    let expected: BTreeSet<_> = FIELDS.into_iter().collect();
+fn validate_schema(object: &Map<String, Value>) -> Result<u64, String> {
+    let (format_version, expected): (u64, BTreeSet<_>) = match object.get("format_version") {
+        None => (1, V1_FIELDS.into_iter().collect()),
+        Some(_) => {
+            let version = integer_field(object, "format_version")?;
+            if version != 2 {
+                return Err("format_version must be integer 2".to_owned());
+            }
+            let fields = match string_field(object, "event_type")? {
+                "ingestion_accepted" => V2_INGESTION_FIELDS.as_slice(),
+                "classification_decision" => V2_CLASSIFICATION_FIELDS.as_slice(),
+                _ => {
+                    return Err(
+                        "event_type must be ingestion_accepted or classification_decision"
+                            .to_owned(),
+                    );
+                }
+            };
+            (version, fields.iter().copied().collect())
+        }
+    };
     let actual: BTreeSet<_> = object.keys().map(String::as_str).collect();
     if actual != expected {
         let missing: Vec<_> = expected.difference(&actual).copied().collect();
@@ -199,34 +257,43 @@ fn validate_schema(object: &Map<String, Value>) -> Result<(), String> {
 
     integer_field(object, "seq")?;
     validate_timestamp(string_field(object, "ts_utc")?)?;
-    for field in ["node_id", "model_id", "class"] {
-        if string_field(object, field)?.is_empty() {
-            return Err(format!("{field} must be non-empty"));
-        }
+    if string_field(object, "node_id")?.is_empty() {
+        return Err("node_id must be non-empty".to_owned());
     }
-    for field in [
-        "raw_csi_hash",
-        "features_hash",
-        "model_config_hash",
-        "prev_hash",
-        "record_hash",
-    ] {
+    for field in ["raw_csi_hash", "prev_hash", "record_hash"] {
         validate_lower_hex(string_field(object, field)?, 64)
             .map_err(|reason| format!("{field} {reason}"))?;
     }
     validate_lower_hex(string_field(object, "signature")?, 128)
         .map_err(|reason| format!("signature {reason}"))?;
 
-    let confidence = object
-        .get("confidence")
-        .and_then(Value::as_number)
-        .ok_or_else(|| "confidence is not a number".to_owned())?
-        .as_f64()
-        .ok_or_else(|| "confidence is not a finite binary64 number".to_owned())?;
-    if !(0.0..=1.0).contains(&confidence) {
-        return Err("confidence is outside [0,1]".to_owned());
+    let event_type = object.get("event_type").and_then(Value::as_str);
+    if format_version == 1 || event_type == Some("classification_decision") {
+        for field in ["model_id", "class"] {
+            if string_field(object, field)?.is_empty() {
+                return Err(format!("{field} must be non-empty"));
+            }
+        }
+        for field in ["features_hash", "model_config_hash"] {
+            validate_lower_hex(string_field(object, field)?, 64)
+                .map_err(|reason| format!("{field} {reason}"))?;
+        }
+        let confidence = object
+            .get("confidence")
+            .and_then(Value::as_number)
+            .ok_or_else(|| "confidence is not a number".to_owned())?
+            .as_f64()
+            .ok_or_else(|| "confidence is not a finite binary64 number".to_owned())?;
+        if !(0.0..=1.0).contains(&confidence) {
+            return Err("confidence is outside [0,1]".to_owned());
+        }
+    } else {
+        if string_field(object, "collector_schema_version")?.is_empty() {
+            return Err("collector_schema_version must be non-empty".to_owned());
+        }
+        integer_field(object, "collector_sequence_number")?;
     }
-    Ok(())
+    Ok(format_version)
 }
 
 fn integer_field(object: &Map<String, Value>, field: &str) -> Result<u64, String> {

@@ -1,4 +1,4 @@
-"""Check every chain-v1 float vector against Python and Rust.
+"""Check every chain-format float vector against Python and Rust.
 
 CI dependency: ``cargo`` and a Rust toolchain must be on PATH. ``cargo run``
 builds the thin Rust example CLI before executing it.
