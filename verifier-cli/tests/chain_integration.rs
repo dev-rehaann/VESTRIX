@@ -330,12 +330,17 @@ fn missing_final_lf_reports_next_sequence() {
 fn altered_signature_is_rejected() {
     let fixture = Fixture::new();
     let mut corrupted = STORED_LINE.as_bytes().to_vec();
-    let signature = b"872e9ac9";
+    let signature = br#""signature":"#;
     let offset = corrupted
         .windows(signature.len())
         .position(|window| window == signature)
-        .expect("signature exists");
-    corrupted[offset] = b'9';
+        .expect("signature exists")
+        + signature.len();
+    corrupted[offset] = if corrupted[offset] == b'9' {
+        b'8'
+    } else {
+        b'9'
+    };
     let chain = fixture.write("bad-signature.jsonl", corrupted);
     let key = fixture.write("public-key.hex", PUBLIC_KEY);
 
