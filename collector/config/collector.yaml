@@ -1,5 +1,6 @@
 tls:
   ca_cert: ../certs/ca.crt
+  crl_path: ../certs/ca.crl
   server_cert: ../certs/server.crt
   server_key: ../certs/server.key
 

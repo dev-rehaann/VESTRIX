@@ -339,8 +339,10 @@ The following controls exist, subject to the implementation limits in the
 
 - **Transport authentication and integrity:** the collector implements mTLS,
   CA validation, an exact certificate-CN allow-list, and binding between the
-  certificate CN and payload `node_id`. The ESP32 client is not implemented, so
-  this is not yet an end-to-end production control.
+  certificate CN and payload `node_id`. It checks a configured CRL, supports
+  SIGHUP reload of the CRL and allow-list for new connections, and includes a
+  30-day node-certificate expiry warning script. The ESP32 client is not
+  implemented, so this is not yet an end-to-end production control.
 - **Input and replay checks:** the collector enforces a strict payload schema,
   numeric and timestamp bounds, message-size limits, and a per-node increasing
   sequence number. Replay state is held in memory and is lost on restart.
@@ -374,7 +376,9 @@ As of this template version, Vestrix does **not** provide:
   dataset matching and re-identification;
 - built-in user RBAC, access reviews, or audit logs for reads and exports;
 - encryption at rest or deployment-wide key management;
-- automatic certificate revocation, rotation, or durable replay state;
+- automated certificate enrollment or rotation, OCSP, HSM-backed or
+  passphrase-protected private keys, or durable replay state (operator-driven CRL
+  revocation and expiry reporting are provided);
 - an end-to-end dispatcher connecting the collector through ML and SOC stages
   (the direct accepted-event collector-to-forensics handoff is implemented);
 - an implemented production model, SHAP generator, or real-world accuracy and

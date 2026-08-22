@@ -3,14 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import socket
 import ssl
+import subprocess
+import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import CertificateBundle, Identity
+import yaml
+from conftest import CertificateBundle, Identity, write_crl
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from forensics import verify_chain
 from forensics.keys import generate_signing_key, save_private_key
@@ -57,6 +63,7 @@ def _config(tmp_path: Path, certificates: CertificateBundle) -> CollectorConfig:
     return CollectorConfig(
         tls=TLSConfig(
             ca_cert=certificates.ca_cert,
+            crl_path=certificates.crl_path,
             server_cert=certificates.server.cert,
             server_key=certificates.server.key,
         ),
@@ -259,6 +266,193 @@ def test_forensic_append_failure_rejects_event(
         == "forensics_handoff_failed"
         for record in caplog.records
     )
+
+
+def test_revoked_enrolled_certificate_is_structured_only_not_forensically_chained(
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store, _ = _configure_forensics(tmp_path, monkeypatch)
+    caplog.set_level(logging.INFO, logger="vestrix_collector.decisions")
+    write_crl(certificates, (certificates.enrolled_node,))
+
+    async def scenario(server: CollectorServer) -> None:
+        with pytest.raises(ssl.SSLError):
+            await asyncio.to_thread(
+                _send_event,
+                server.port,
+                certificates.ca_cert,
+                certificates.enrolled_node,
+                _payload(),
+            )
+        for _ in range(100):
+            if any(
+                getattr(record, "decision_fields", {}).get("reason")
+                == "tls_handshake_failed"
+                for record in caplog.records
+            ):
+                return
+            await asyncio.sleep(0.01)
+        pytest.fail("server did not emit a TLS rejection decision")
+
+    asyncio.run(_with_server(_config(tmp_path, certificates), None, scenario))
+
+    assert not store.exists()
+    assert any(
+        getattr(record, "decision_fields", {}).get("reason")
+        == "tls_handshake_failed"
+        for record in caplog.records
+    )
+
+
+def test_crl_reload_rejects_revoked_node_without_restart(
+    tmp_path: Path, certificates: CertificateBundle
+) -> None:
+    received: list[CSIEvent] = []
+
+    async def scenario(server: CollectorServer) -> dict[str, str]:
+        first = await asyncio.to_thread(
+            _send_event,
+            server.port,
+            certificates.ca_cert,
+            certificates.enrolled_node,
+            _payload(),
+        )
+        write_crl(certificates, (certificates.enrolled_node,))
+        await server.reload_security_state()
+        with pytest.raises(ssl.SSLError):
+            await asyncio.to_thread(
+                _send_event,
+                server.port,
+                certificates.ca_cert,
+                certificates.enrolled_node,
+                _payload(2),
+            )
+        return first
+
+    response = asyncio.run(
+        _with_server(_config(tmp_path, certificates), received.append, scenario)
+    )
+    assert response == {
+        "status": "accepted",
+        "reason": "authenticated_event_handed_off",
+    }
+    assert received == [_payload()]
+
+
+def test_allowlist_reload_rejects_removed_node_without_restart(
+    tmp_path: Path, certificates: CertificateBundle
+) -> None:
+    received: list[CSIEvent] = []
+    config = _config(tmp_path, certificates)
+
+    async def scenario(server: CollectorServer) -> dict[str, str]:
+        config.allowlist_path.write_text("nodes:\n  - node-99\n", encoding="utf-8")
+        await server.reload_security_state()
+        return await asyncio.to_thread(
+            _send_event,
+            server.port,
+            certificates.ca_cert,
+            certificates.enrolled_node,
+            None,
+        )
+
+    response = asyncio.run(_with_server(config, received.append, scenario))
+    assert response == {
+        "status": "rejected",
+        "reason": "unenrolled_certificate_cn",
+    }
+    assert received == []
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="requires POSIX SIGHUP")
+def test_real_sighup_reloads_crl_in_collector_process(
+    tmp_path: Path, certificates: CertificateBundle
+) -> None:
+    with socket.socket() as reserved_socket:
+        reserved_socket.bind(("127.0.0.1", 0))
+        port = reserved_socket.getsockname()[1]
+
+    allowlist = tmp_path / "nodes.yaml"
+    allowlist.write_text("nodes:\n  - node-01\n", encoding="utf-8")
+    config_path = tmp_path / "collector.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "tls": {
+                    "ca_cert": str(certificates.ca_cert),
+                    "crl_path": str(certificates.crl_path),
+                    "server_cert": str(certificates.server.cert),
+                    "server_key": str(certificates.server.key),
+                },
+                "allowlist_path": str(allowlist),
+                "server": {"host": "127.0.0.1", "port": port},
+            }
+        ),
+        encoding="utf-8",
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-m", "vestrix_collector", "--config", str(config_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while True:
+            if process.poll() is not None:
+                pytest.fail(
+                    f"collector exited before startup:\n{process.stdout.read()}"
+                )
+            try:
+                first = _send_event(
+                    port,
+                    certificates.ca_cert,
+                    certificates.enrolled_node,
+                    _payload(),
+                )
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    pytest.fail(
+                        "collector did not accept a connection within 10 seconds"
+                    )
+                time.sleep(0.05)
+        assert first == {
+            "status": "accepted",
+            "reason": "authenticated_event_handed_off",
+        }
+
+        write_crl(certificates, (certificates.enrolled_node,))
+        os.kill(process.pid, signal.SIGHUP)
+        deadline = time.monotonic() + 10
+        sequence_number = 2
+        while True:
+            try:
+                _send_event(
+                    port,
+                    certificates.ca_cert,
+                    certificates.enrolled_node,
+                    _payload(sequence_number),
+                )
+            except ssl.SSLError:
+                break
+            if time.monotonic() >= deadline:
+                pytest.fail(
+                    "collector did not enforce the reloaded CRL within 10 seconds"
+                )
+            sequence_number += 1
+            time.sleep(0.05)
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def test_valid_certificate_with_unenrolled_cn_is_rejected(
