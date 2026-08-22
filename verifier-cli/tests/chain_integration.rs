@@ -330,7 +330,7 @@ fn missing_final_lf_reports_next_sequence() {
 fn altered_signature_is_rejected() {
     let fixture = Fixture::new();
     let mut corrupted = STORED_LINE.as_bytes().to_vec();
-    let signature = br#""signature":"#;
+    let signature = b"\"signature\":\"";
     let offset = corrupted
         .windows(signature.len())
         .position(|window| window == signature)
