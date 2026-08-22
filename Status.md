@@ -75,3 +75,11 @@ Full research context and detailed rationale live in:
 
 - [`docs/RESEARCH.md`](docs/RESEARCH.md) (prior-art analysis, standards alignment, rigor playbook)
 - [`docs/INITIALIZATION.md`](docs/INITIALIZATION.md) (full architecture/build reference, v0.1 → v1.0 roadmap)
+
+---
+
+## Milestone — August 22, 2026: First Verified All-Green Release Gate
+
+- CI is now a real release gate: Ruff lint, Python tests, Rust tests, Clippy, and Python/Rust float-canonicalization parity all block merging through the required status checks on protected `main`.
+- The first verified Python/Rust float-canonicalization parity result completed with 25/25 vectors passing and 0 divergences at commit `b0af5bfa6af456697bb0108981f11ddcb2c96c26` in [GitHub Actions run 32570008347](https://github.com/dev-rehaann/VESTRIX/actions/runs/32570008347).
+- The Rust test suite passed 14/14 tests and Clippy completed cleanly, independently verified on Linux GitHub Actions rather than inferred from local documentation.
