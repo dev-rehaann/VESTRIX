@@ -449,7 +449,9 @@ def test_real_sighup_reloads_crl_in_collector_process(
             sequence_number += 1
             time.sleep(0.05)
         assert process.poll() is None
-        assert verify_chain(store, public_key).records_verified == 1
+        assert (
+            verify_chain(store, public_key).records_verified == sequence_number - 1
+        )
     finally:
         process.terminate()
         try:
