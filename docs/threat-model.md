@@ -118,6 +118,7 @@ measurement.
 | Status | Control | Security effect |
 |---|---|---|
 | `IMPLEMENTED` | The asyncio TCP collector requires mutual TLS and validates client certificates against the configured CA. | Rejects unauthenticated TCP clients and protects the confidentiality and integrity of accepted data in transit. |
+| `IMPLEMENTED` | OpenSSL leaf-certificate CRL checking rejects certificates listed in the configured CRL. The allow-list and CRL-backed TLS context are atomically reloadable for new connections through SIGHUP on supported platforms. | Lets an operator revoke an issued node certificate or change enrollment without restarting the collector. Existing connections are not retroactively terminated. |
 | `IMPLEMENTED` | The collector requires one certificate CN, checks it against an exact node allow-list, and binds the payload `node_id` to that CN. | Prevents an authenticated node from claiming a different allow-listed node identity through the payload alone. |
 | `IMPLEMENTED` | Strict payload schema, type, size, timestamp, and numeric-bound validation is performed before handoff. | Rejects malformed or out-of-contract events; it does not establish that well-formed CSI is physically truthful. |
 | `IMPLEMENTED` | A per-node, strictly increasing `sequence_number` is enforced in collector memory. Replayed or out-of-order values are rejected before handoff. | Detects replay within the lifetime of the collector process for a given certificate identity. |
@@ -145,10 +146,13 @@ measurement.
 - Replay state is held in process memory. A collector restart loses the last-seen
   sequence values, so the present mechanism does not provide replay continuity
   across restarts or node re-enrollment.
-- The allow-list is loaded when the collector is constructed. CRL/OCSP checking,
-  automated credential rotation, and hot reload of enrollment state are not
-  implemented; credential revocation requires an operator configuration change and
-  collector restart.
+- The collector checks the configured CRL and can atomically reload both that CRL
+  and the node allow-list on SIGHUP. Revocation remains an operator action: run the
+  CA revocation helper, distribute the regenerated CRL to the configured path, and
+  signal each collector process. A failed reload retains the last valid state.
+- `check_expiry.sh` flags node certificates within 30 days of expiry by default; it
+  provides visibility only. Automated enrollment and rotation, OCSP, HSM-backed
+  key storage, and passphrase-protected private keys are not implemented.
 - RF-domain manipulation occurs before TLS protection and is not mitigated by mTLS
   or JSON validation.
 - No adversarial CSI robustness result is available for Vestrix. Published results

@@ -49,11 +49,13 @@ def load_enrolled_nodes(path: Path) -> frozenset[str]:
 
 
 def build_server_tls_context(config: CollectorConfig) -> ssl.SSLContext:
-    """Build a server context that requires a project-CA client certificate."""
+    """Build a server context requiring a non-revoked project-CA certificate."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.verify_mode = ssl.CERT_REQUIRED
     context.load_verify_locations(cafile=str(config.tls.ca_cert))
+    context.load_verify_locations(cafile=str(config.tls.crl_path))
+    context.verify_flags |= ssl.VERIFY_CRL_CHECK_LEAF
     context.load_cert_chain(
         certfile=str(config.tls.server_cert), keyfile=str(config.tls.server_key)
     )
@@ -73,8 +75,8 @@ class CollectorServer:
         self._config = config
         self._event_logger = event_logger or forensics.log_event
         self._logger = logger or logging.getLogger("vestrix_collector.decisions")
-        self._enrolled_nodes = load_enrolled_nodes(config.allowlist_path)
-        self._tls_context = build_server_tls_context(config)
+        self._security_state_lock = threading.Lock()
+        self._enrolled_nodes, self._tls_context = self._load_security_state()
         self._sequence_lock = threading.Lock()
         self._last_sequences: dict[str, int] = {}
         self._listener: socket.socket | None = None
@@ -87,6 +89,31 @@ class CollectorServer:
         if self._listener is None:
             raise RuntimeError("collector has not been started")
         return int(self._listener.getsockname()[1])
+
+    async def reload_security_state(self) -> None:
+        """Reload the allow-list and CRL-backed TLS context for new connections."""
+        enrolled_nodes, tls_context = await asyncio.to_thread(
+            self._load_security_state
+        )
+        with self._security_state_lock:
+            self._enrolled_nodes = enrolled_nodes
+            self._tls_context = tls_context
+        self._logger.info(
+            "collector security state reloaded",
+            extra={
+                "event": "collector_lifecycle",
+                "decision_fields": {
+                    "state": "security_state_reloaded",
+                    "enrolled_node_count": len(enrolled_nodes),
+                },
+            },
+        )
+
+    def _load_security_state(self) -> tuple[frozenset[str], ssl.SSLContext]:
+        return (
+            load_enrolled_nodes(self._config.allowlist_path),
+            build_server_tls_context(self._config),
+        )
 
     async def start(self) -> None:
         """Bind the listener and start accepting sockets."""
@@ -153,8 +180,11 @@ class CollectorServer:
         try:
             client.setblocking(True)
             client.settimeout(self._config.server.handshake_timeout_seconds)
-            with self._tls_context.wrap_socket(client, server_side=True) as tls_socket:
-                self._handle_tls_socket(tls_socket, peer)
+            with self._security_state_lock:
+                tls_context = self._tls_context
+                enrolled_nodes = self._enrolled_nodes
+            with tls_context.wrap_socket(client, server_side=True) as tls_socket:
+                self._handle_tls_socket(tls_socket, peer, enrolled_nodes)
         except (ssl.SSLError, TimeoutError, OSError) as exc:
             self._decision(
                 "reject",
@@ -174,14 +204,19 @@ class CollectorServer:
             )
             client.close()
 
-    def _handle_tls_socket(self, tls_socket: ssl.SSLSocket, peer: str) -> None:
+    def _handle_tls_socket(
+        self,
+        tls_socket: ssl.SSLSocket,
+        peer: str,
+        enrolled_nodes: frozenset[str],
+    ) -> None:
         certificate = tls_socket.getpeercert()
         common_names = _certificate_common_names(certificate)
         if len(common_names) != 1:
             self._reject_tls_socket(tls_socket, "invalid_certificate_cn", peer=peer)
             return
         certificate_node_id = common_names[0]
-        if certificate_node_id not in self._enrolled_nodes:
+        if certificate_node_id not in enrolled_nodes:
             self._reject_tls_socket(
                 tls_socket,
                 "unenrolled_certificate_cn",

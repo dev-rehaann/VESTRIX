@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import CertificateBundle, Identity
+from conftest import CertificateBundle, Identity, write_crl
 
 from vestrix_collector.config import CollectorConfig, ServerConfig, TLSConfig
 from vestrix_collector.models import CSIEvent
@@ -54,6 +54,7 @@ def _config(tmp_path: Path, certificates: CertificateBundle) -> CollectorConfig:
     return CollectorConfig(
         tls=TLSConfig(
             ca_cert=certificates.ca_cert,
+            crl_path=certificates.crl_path,
             server_cert=certificates.server.cert,
             server_key=certificates.server.key,
         ),
@@ -103,6 +104,88 @@ def test_valid_certificate_and_enrolled_node_is_accepted(
         "reason": "authenticated_event_handed_off",
     }
     assert received == [_payload()]
+
+
+def test_revoked_enrolled_certificate_is_rejected_during_tls(
+    tmp_path: Path, certificates: CertificateBundle
+) -> None:
+    received: list[CSIEvent] = []
+    write_crl(certificates, (certificates.enrolled_node,))
+
+    async def scenario(server: CollectorServer) -> None:
+        with pytest.raises(ssl.SSLError):
+            await asyncio.to_thread(
+                _send_event,
+                server.port,
+                certificates.ca_cert,
+                certificates.enrolled_node,
+                _payload(),
+            )
+
+    asyncio.run(
+        _with_server(_config(tmp_path, certificates), received.append, scenario)
+    )
+    assert received == []
+
+
+def test_crl_reload_rejects_revoked_node_without_restart(
+    tmp_path: Path, certificates: CertificateBundle
+) -> None:
+    received: list[CSIEvent] = []
+
+    async def scenario(server: CollectorServer) -> dict[str, str]:
+        first = await asyncio.to_thread(
+            _send_event,
+            server.port,
+            certificates.ca_cert,
+            certificates.enrolled_node,
+            _payload(),
+        )
+        write_crl(certificates, (certificates.enrolled_node,))
+        await server.reload_security_state()
+        with pytest.raises(ssl.SSLError):
+            await asyncio.to_thread(
+                _send_event,
+                server.port,
+                certificates.ca_cert,
+                certificates.enrolled_node,
+                _payload(2),
+            )
+        return first
+
+    response = asyncio.run(
+        _with_server(_config(tmp_path, certificates), received.append, scenario)
+    )
+    assert response == {
+        "status": "accepted",
+        "reason": "authenticated_event_handed_off",
+    }
+    assert received == [_payload()]
+
+
+def test_allowlist_reload_rejects_removed_node_without_restart(
+    tmp_path: Path, certificates: CertificateBundle
+) -> None:
+    received: list[CSIEvent] = []
+    config = _config(tmp_path, certificates)
+
+    async def scenario(server: CollectorServer) -> dict[str, str]:
+        config.allowlist_path.write_text("nodes:\n  - node-99\n", encoding="utf-8")
+        await server.reload_security_state()
+        return await asyncio.to_thread(
+            _send_event,
+            server.port,
+            certificates.ca_cert,
+            certificates.enrolled_node,
+            None,
+        )
+
+    response = asyncio.run(_with_server(config, received.append, scenario))
+    assert response == {
+        "status": "rejected",
+        "reason": "unenrolled_certificate_cn",
+    }
+    assert received == []
 
 
 def test_valid_certificate_with_unenrolled_cn_is_rejected(
