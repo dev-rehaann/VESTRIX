@@ -369,8 +369,11 @@ def test_allowlist_reload_rejects_removed_node_without_restart(
 
 @pytest.mark.skipif(sys.platform != "linux", reason="requires POSIX SIGHUP")
 def test_real_sighup_reloads_crl_in_collector_process(
-    tmp_path: Path, certificates: CertificateBundle
+    tmp_path: Path,
+    certificates: CertificateBundle,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    store, public_key = _configure_forensics(tmp_path, monkeypatch)
     with socket.socket() as reserved_socket:
         reserved_socket.bind(("127.0.0.1", 0))
         port = reserved_socket.getsockname()[1]
@@ -446,6 +449,7 @@ def test_real_sighup_reloads_crl_in_collector_process(
             sequence_number += 1
             time.sleep(0.05)
         assert process.poll() is None
+        assert verify_chain(store, public_key).records_verified == 1
     finally:
         process.terminate()
         try:
