@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from opentimestamps.core.serialize import (
 from opentimestamps.core.timestamp import DetachedTimestampFile, Timestamp
 
 from forensics.anchor import (
+    AnchorConfigurationError,
     AnchorTransientError,
     OpenTimestampsBackend,
     inspect_proof,
@@ -185,6 +187,65 @@ def test_backend_upgrade_surfaces_network_timeout_as_transient(
 
     with pytest.raises(AnchorTransientError, match="calendar timed out"):
         OpenTimestampsBackend().upgrade(proof, digest)
+
+
+@pytest.mark.parametrize(
+    ("quorum", "calendar_urls"),
+    [(0, ("https://one", "https://two")), (2, ("https://one",))],
+)
+def test_backend_prevalidates_client_quorum_before_submission(
+    quorum: int,
+    calendar_urls: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import opentimestamps.calendar as calendar_module
+    import otsclient.args as args_module
+    import otsclient.cmds as cmds_module
+
+    called = False
+
+    def should_not_submit(*args: Any, **kwargs: Any) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(calendar_module, "DEFAULT_AGGREGATORS", calendar_urls)
+    monkeypatch.setattr(
+        args_module,
+        "parse_ots_args",
+        lambda raw_args: SimpleNamespace(m=quorum),
+    )
+    monkeypatch.setattr(cmds_module, "create_timestamp", should_not_submit)
+
+    with pytest.raises(AnchorConfigurationError, match=f"quorum {quorum} is invalid"):
+        OpenTimestampsBackend().stamp(bytes.fromhex("42" * 32))
+
+    assert not called
+
+
+def test_create_timestamp_quorum_exit_becomes_transient_worker_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_factory: Any,
+) -> None:
+    import otsclient.cmds as cmds_module
+
+    def quorum_not_met(*args: Any, **kwargs: Any) -> None:
+        raise SystemExit(1)
+
+    monkeypatch.setattr(cmds_module, "create_timestamp", quorum_not_met)
+    config, record = _setup_chain(tmp_path, monkeypatch, event_factory)
+
+    assert run_once(
+        config,
+        now=datetime(2026, 8, 23, tzinfo=UTC),
+        jitter_sample=0.0,
+    ) == 1
+
+    row = _row(config, record)
+    assert row["state"] == RETRY_FAILED
+    assert row["failure_class"] == "transient"
+    assert row["retry_from"] == QUEUED
+    assert row["last_error"] == "OpenTimestamps calendar quorum failed"
 
 
 def test_queued_transitions_to_submitted_pending(

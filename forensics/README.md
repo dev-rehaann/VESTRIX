@@ -7,5 +7,5 @@ append are implemented and tested. Chain format version 2 structurally distingui
 `ingestion_accepted` records from `classification_decision` records and omits
 inapplicable ML fields from ingestion records. The collector's default adapter fails
 closed when append cannot complete. Collector rejections remain operational logs,
-not signed-chain records. The production OpenTimestamps backend remains a
-placeholder.
+not signed-chain records. The production OpenTimestamps backend is implemented
+and tested with a scheduled lifecycle worker.

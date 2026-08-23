@@ -45,6 +45,10 @@ class AnchorTransientError(RuntimeError):
     """A calendar/client operation failed and may succeed on a later run."""
 
 
+class AnchorConfigurationError(ValueError):
+    """The pinned OpenTimestamps client was configured inconsistently."""
+
+
 @dataclass(frozen=True, slots=True)
 class AnchorReceipt:
     """Metadata for a proof written for one immutable chain tip."""
@@ -94,6 +98,8 @@ class OpenTimestampsBackend:
         )
         try:
             self._submitter(calendar_commitment)
+        except AnchorConfigurationError:
+            raise
         except AnchorTransientError:
             raise
         except SystemExit as exc:
@@ -126,7 +132,15 @@ def _submit_with_client_defaults(timestamp: Timestamp) -> None:
         from otsclient.cmds import create_timestamp
 
         args = parse_ots_args(["stamp"])
-        create_timestamp(timestamp, list(DEFAULT_AGGREGATORS), args)
+        calendar_urls = list(DEFAULT_AGGREGATORS)
+        if not 0 < args.m <= len(calendar_urls):
+            raise AnchorConfigurationError(
+                f"OpenTimestamps quorum {args.m} is invalid for "
+                f"{len(calendar_urls)} calendars"
+            )
+        create_timestamp(timestamp, calendar_urls, args)
+    except AnchorConfigurationError:
+        raise
     except AnchorTransientError:
         raise
     except SystemExit as exc:

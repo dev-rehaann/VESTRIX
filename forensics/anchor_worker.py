@@ -14,6 +14,7 @@ from filelock import FileLock
 
 from ._store import chain_tip
 from .anchor import (
+    AnchorConfigurationError,
     AnchorIntegrityError,
     OpenTimestampsBackend,
     TimestampBackend,
@@ -406,6 +407,8 @@ def _process_job(
             _process_queued(store, job, backend, now)
         elif job["state"] == SUBMITTED_PENDING:
             _process_pending(store, job, backend, now)
+    except AnchorConfigurationError:
+        raise
     except AnchorIntegrityError as exc:
         store.record_failure(job, "integrity", str(exc), _utc_text(now), None)
         LOGGER.error(
