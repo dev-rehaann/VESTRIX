@@ -1,0 +1,15 @@
+[Unit]
+Description=VESTRIX one-shot OpenTimestamps anchor worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=vestrix
+Group=vestrix
+WorkingDirectory=/opt/vestrix
+Environment=VESTRIX_FORENSICS_STORE=/var/lib/vestrix/forensics/chain.jsonl
+ExecStart=/opt/vestrix/.venv/bin/python -m forensics.anchor_worker --database /var/lib/vestrix/forensics/anchors.sqlite3 --proof-directory /var/lib/vestrix/forensics/anchors --interval-minutes 15 --confirmation-threshold 6
+
+[Install]
+WantedBy=multi-user.target

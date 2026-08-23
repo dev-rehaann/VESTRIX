@@ -1,16 +1,17 @@
-//! Conservative OpenTimestamps proof inspection.
+//! OpenTimestamps Bitcoin anchor verification.
 //!
 //! This module implements the detached-proof envelope and the common Bitcoin
 //! path operations (append, prepend, and SHA-256). It proves that the chain tip
-//! reaches a Bitcoin block-header attestation. A `.ots` file does not carry the
-//! authoritative header or best-chain evidence, however, so this standalone
-//! subset deliberately never reports full anchor success. That final check is
-//! stubbed rather than replaced by trust in a calendar or web API.
+//! reaches a Bitcoin block-header attestation, then verifies the commitment
+//! against the active-chain header returned by an independently configured
+//! Bitcoin Core node.
 
 use std::fmt;
 use std::fs;
 use std::path::Path;
 
+use corepc_client::bitcoin::hashes::Hash;
+use corepc_client::client_sync::v17::Client;
 use sha2::{Digest, Sha256};
 
 use crate::chain::{self, ChainTip};
@@ -19,6 +20,7 @@ const MAGIC: &[u8] = b"\x00OpenTimestamps\x00\x00Proof\x00\xbf\x89\xe2\xe8\x84\x
 const BITCOIN_ATTESTATION: [u8; 8] = [0x05, 0x88, 0x96, 0x0d, 0x73, 0xd7, 0x19, 0x01];
 const MAX_PROOF_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARGUMENT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_ATTESTATION_BYTES: usize = 8192;
 const MAX_OP_BYTES: usize = 4096;
 const MAX_DEPTH: usize = 256;
 
@@ -44,25 +46,107 @@ pub struct InspectedProof {
     pub attestations: Vec<BitcoinAttestation>,
 }
 
-/// Check tip binding and inspect Bitcoin attestations, then refuse to claim
-/// complete verification without independent best-chain data.
-pub fn verify_anchor(chain_path: &Path, proof_path: &Path) -> Result<(), AnchorError> {
-    let tip = read_tip_without_authentication(chain_path)?;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnchorReport {
+    pub seq: u64,
+    pub height: u64,
+    pub block_hash: String,
+    pub confirmations: u64,
+}
+
+/// Verify the chain-tip binding and one Bitcoin attestation against Bitcoin
+/// Core's current active chain. Any one valid Bitcoin proof branch is enough.
+pub fn verify_anchor(
+    chain_path: &Path,
+    proof_path: &Path,
+    client: &Client,
+) -> Result<AnchorReport, AnchorError> {
+    let tip = read_tip_without_authentication(chain_path)
+        .map_err(|error| AnchorError(format!("chain tip invalid: {error}")))?;
     let tip_bytes = chain::decode_hex_array::<32>(&tip.record_hash)
-        .map_err(|error| AnchorError(format!("invalid chain tip hash: {error}")))?;
+        .map_err(|error| AnchorError(format!("chain tip invalid: {error}")))?;
     let proof = fs::read(proof_path)
-        .map_err(|error| AnchorError(format!("cannot read OTS proof: {error}")))?;
-    let inspected = inspect_proof(&proof, &tip_bytes)?;
-    let heights = inspected
-        .attestations
-        .iter()
-        .map(|attestation| attestation.height.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(AnchorError(format!(
-        "anchor verification incomplete: proof binds to chain tip seq {} and reaches Bitcoin attestation height(s) {heights}, but authoritative block-header/best-chain verification is not implemented; refusing to report success",
-        tip.seq
-    )))
+        .map_err(|error| AnchorError(format!("proof malformed: cannot read OTS proof: {error}")))?;
+    let inspected = inspect_proof(&proof, &tip_bytes)
+        .map_err(|error| AnchorError(format!("proof malformed: {error}")))?;
+    let tip_height = client
+        .get_block_count()
+        .map_err(|error| AnchorError(format!("RPC unreachable: getblockcount failed: {error}")))?
+        .0;
+    let mut last_failure = None;
+
+    for attestation in inspected.attestations {
+        if attestation.height > tip_height {
+            last_failure = Some(AnchorError(format!(
+                "block not on active chain: attested height {} is above current tip height {tip_height}",
+                attestation.height
+            )));
+            continue;
+        }
+        // The OTS Bitcoin attestation stores only height, never a block hash.
+        // Therefore the node's by-height active-chain hash is authoritative.
+        let active_hash = client
+            .get_block_hash(attestation.height)
+            .map_err(|error| {
+                AnchorError(format!(
+                    "RPC unreachable: getblockhash({}) failed: {error}",
+                    attestation.height
+                ))
+            })?
+            .block_hash()
+            .map_err(|error| {
+                AnchorError(format!(
+                    "RPC unreachable: getblockhash({}) returned a malformed hash: {error}",
+                    attestation.height
+                ))
+            })?;
+        let header = client
+            .get_block_header(&active_hash)
+            .map_err(|error| {
+                AnchorError(format!(
+                    "RPC unreachable: getblockheader({active_hash}) failed: {error}"
+                ))
+            })?
+            .block_header()
+            .map_err(|error| {
+                AnchorError(format!(
+                    "RPC unreachable: getblockheader({active_hash}) returned a malformed header: {error}"
+                ))
+            })?;
+
+        if header.block_hash() != active_hash {
+            last_failure = Some(AnchorError(format!(
+                "block not on active chain: getblockhash({}) returned {active_hash}, but that header hashes to {}",
+                attestation.height,
+                header.block_hash()
+            )));
+            continue;
+        }
+        if header.merkle_root.to_byte_array().as_slice() != attestation.commitment {
+            last_failure = Some(AnchorError(format!(
+                "commitment mismatch: OTS result does not equal the active block Merkle root at height {}",
+                attestation.height
+            )));
+            continue;
+        }
+
+        let confirmations = tip_height - attestation.height + 1;
+        if confirmations < 6 {
+            last_failure = Some(AnchorError(format!(
+                "insufficient confirmations: block at height {} has {confirmations}; require at least 6",
+                attestation.height
+            )));
+            continue;
+        }
+        return Ok(AnchorReport {
+            seq: tip.seq,
+            height: attestation.height,
+            block_hash: active_hash.to_string(),
+            confirmations,
+        });
+    }
+
+    Err(last_failure.expect("inspect_proof requires at least one Bitcoin attestation"))
 }
 
 /// Parse enough of a detached OTS proof to bind a SHA-256 digest and execute
@@ -78,7 +162,7 @@ pub fn inspect_proof(
     }
     let mut parser = Parser::new(proof);
     parser.expect(MAGIC, "invalid OTS detached-proof header")?;
-    let version = parser.varuint()?;
+    let version = parser.byte()?;
     if version != 1 {
         return Err(AnchorError(format!("unsupported OTS version {version}")));
     }
@@ -267,7 +351,18 @@ impl<'a> Parser<'a> {
             .try_into()
             .expect("take returned exactly eight bytes");
         let payload = self.varbytes()?;
+        if payload.len() > MAX_ATTESTATION_BYTES {
+            return Err(AnchorError(
+                "OTS attestation payload exceeds the 8192-byte limit".to_owned(),
+            ));
+        }
         if tag == BITCOIN_ATTESTATION {
+            if message.len() != 32 {
+                return Err(AnchorError(format!(
+                    "Bitcoin attestation commitment is {} bytes; expected 32",
+                    message.len()
+                )));
+            }
             let mut payload_parser = Parser::new(payload);
             let height = payload_parser.varuint()?;
             if !payload_parser.is_finished() {
@@ -383,10 +478,14 @@ mod tests {
 
     #[test]
     fn rejects_variable_integer_overflow() {
-        let mut proof = MAGIC.to_vec();
+        let digest = [0x55; 32];
+        let mut proof = proof_prefix(&digest);
+        proof.push(0x00);
+        proof.extend_from_slice(&BITCOIN_ATTESTATION);
+        proof.push(0x0b);
         proof.extend_from_slice(&[0xff; 10]);
         proof.push(0x02);
-        let error = inspect_proof(&proof, &[0; 32]).unwrap_err();
+        let error = inspect_proof(&proof, &digest).unwrap_err();
         assert!(error.0.contains("variable integer overflow"));
     }
 }

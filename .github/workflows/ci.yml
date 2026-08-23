@@ -79,5 +79,45 @@ jobs:
         working-directory: verifier-cli
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Start Bitcoin Core 29.0 regtest
+        run: |
+          docker run --rm -d --name vestrix-regtest \
+            -p 127.0.0.1:18443:18443 \
+            bitcoin/bitcoin:29.0@sha256:a6aa8a9e349b4108d13c558dbe43064057bd7b6474b858966884f9cb95b7ed78 \
+            --regtest --server --rpcbind=0.0.0.0 --rpcallowip=0.0.0.0/0 \
+            --rpcuser=vestrix --rpcpassword=regtest-only --fallbackfee=0.0001
+          for attempt in {1..30}; do
+            if docker exec vestrix-regtest bitcoin-cli -regtest \
+              -rpcuser=vestrix -rpcpassword=regtest-only getblockcount >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs vestrix-regtest
+          exit 1
+
+      - name: Mine six regtest blocks
+        run: |
+          docker exec vestrix-regtest bitcoin-cli -regtest \
+            -rpcuser=vestrix -rpcpassword=regtest-only createwallet vestrix
+          address=$(docker exec vestrix-regtest bitcoin-cli -regtest \
+            -rpcuser=vestrix -rpcpassword=regtest-only -rpcwallet=vestrix getnewaddress)
+          docker exec vestrix-regtest bitcoin-cli -regtest \
+            -rpcuser=vestrix -rpcpassword=regtest-only generatetoaddress 6 "$address"
+
+      - name: Verify against real Bitcoin Core regtest
+        working-directory: verifier-cli
+        env:
+          VESTRIX_REGTEST_RPC_URL: http://127.0.0.1:18443
+          VESTRIX_REGTEST_RPC_USER: vestrix
+          VESTRIX_REGTEST_RPC_PASSWORD: regtest-only
+        run: >-
+          cargo test --test anchor_integration
+          verifies_against_real_bitcoin_core_regtest -- --ignored --exact
+
+      - name: Stop Bitcoin Core regtest
+        if: always()
+        run: docker stop vestrix-regtest || true
+
       - name: Verify Python/Rust float canonicalization parity
         run: python3 forensics/check_float_canonicalization.py

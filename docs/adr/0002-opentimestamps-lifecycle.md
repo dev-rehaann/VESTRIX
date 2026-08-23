@@ -1,14 +1,13 @@
 # ADR 0002: OpenTimestamps lifecycle
 
-- Status: Proposed
+- Status: Implemented
 - Date: 2026-08-22
 - Decision owner: VESTRIX maintainer
 
 This ADR defines the boundary between the immutable forensic chain, asynchronous
 OpenTimestamps submission, proof upgrading, and independent Bitcoin
-verification. It does not claim that the design is implemented. The current
-Python production backend and full Rust anchor verdict remain intentionally
-fail-closed until an implementation conforming to this ADR is reviewed.
+verification. Decisions 1 through 5 are implemented; retained open questions
+below still require maintainer policy sign-off where noted.
 
 ## 1. Digest-boundary handling
 
@@ -192,11 +191,10 @@ artifacts establishes the evidentiary result.
 
 ### Context
 
-The current Rust verifier authenticates forensic chains and partially inspects
-OpenTimestamps proofs. It intentionally returns `anchor verification
-incomplete` after reaching a Bitcoin attestation because the proof contains a
-height, not authoritative evidence that the corresponding header belongs to
-Bitcoin's active best chain.
+Before this decision was implemented, the Rust verifier authenticated forensic
+chains and stopped after partially inspecting OpenTimestamps proofs because the
+proof contains a height, not authoritative evidence that the corresponding
+header belongs to Bitcoin's active best chain.
 
 The project roadmap assigns the independent verifier and OpenTimestamps
 anchoring to v0.8-v0.9, with the acceptance condition that a third party can
@@ -230,9 +228,9 @@ forensic logger, Python OpenTimestamps adapter, and public calendars. A pruned
 Bitcoin Core node is acceptable because verification needs headers and active
 chain lookup rather than historical transaction bodies.
 
-The current `anchor verification incomplete` behavior remains correct until all
-of these conditions are implemented and tested. It must not be replaced with a
-success result in stages.
+The former `anchor verification incomplete` behavior was retained until all of
+these conditions were implemented and tested; no intermediate partial-success
+verdict was introduced.
 
 ### Consequences
 
@@ -249,6 +247,29 @@ success result in stages.
 - The verifier only needs to accept valid operations emitted by the pinned
   supported client; unsupported valid OTS variants continue to fail closed
   until deliberately added.
+
+### Known risk: corepc-client is not endorsed for production use
+
+The [`corepc` README](https://github.com/rust-bitcoin/corepc#readme) says:
+"Please do not use corepc-client in production and raise bugs, issues, or
+feature requests." VESTRIX uses it despite that warning because the required
+surface is limited to four deterministic,
+read-only Bitcoin Core methods: `getblockcount`, `getblockhash`,
+`getblockheader`, and `getbestblockhash`. The current verification path uses the
+first three; `getbestblockhash` is the only approved alternative tip lookup.
+VESTRIX does not use this dependency for wallet operations, signing,
+transaction creation, or transaction broadcast, so no funds are placed at
+risk.
+
+The dependency's blast radius is nevertheless material to the verifier's
+credibility: a parsing, transport, or response-conversion bug could make the
+tool report an incorrect confirmation count or commitment-mismatch result,
+including an incorrect verification verdict. It cannot corrupt or rewrite the
+forensic chain, and it cannot transact through the Bitcoin Core node, because
+VESTRIX's use of the client is read-only. Version pinning, deterministic RPC
+response tests, and the Bitcoin Core regtest CI check are required mitigations;
+replacing the client remains appropriate if a production-endorsed maintained
+alternative is approved.
 
 ### Rejected Alternatives
 
