@@ -353,27 +353,26 @@ fn altered_signature_is_rejected() {
 }
 
 #[test]
-fn anchor_nonzero_output_is_not_misrepresented_as_chain_corruption() {
+fn anchor_input_failure_is_specific() {
     let fixture = Fixture::new();
     let missing_chain = fixture.directory.join("missing-chain.jsonl");
     let missing_proof = fixture.directory.join("missing-proof.ots");
+    let cookie = fixture.write(".cookie", "user:password\n");
     let output = Command::new(env!("CARGO_BIN_EXE_vestrix-verify"))
         .args(["anchor"])
         .arg(missing_chain)
         .args(["--ots-proof"])
         .arg(missing_proof)
+        .args(["--rpc-url", "http://127.0.0.1:1"])
+        .args(["--rpc-cookie"])
+        .arg(cookie)
         .output()
         .expect("run anchor command");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("anchor check incomplete"), "{stderr}");
     assert!(
-        stderr.contains("does NOT mean the chain is corrupt or tampered"),
-        "{stderr}"
-    );
-    assert!(
-        stderr.contains("`chain` subcommand is the chain-integrity verdict"),
+        stderr.contains("chain tip invalid: cannot read chain"),
         "{stderr}"
     );
 }

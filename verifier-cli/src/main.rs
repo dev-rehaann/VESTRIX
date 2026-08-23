@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use corepc_client::client_sync::{Auth, v17::Client};
 
 use vestrix_verifier_cli::{anchor, chain};
 
@@ -27,13 +28,20 @@ enum Command {
         #[arg(long)]
         pubkey: PathBuf,
     },
-    /// Run the partial anchor check; this is not a chain-integrity verdict.
+    /// Verify an OTS anchor against a configured Bitcoin Core node.
     Anchor {
         /// Path to the canonical JSONL chain.
         chain: PathBuf,
         /// Path to a detached OpenTimestamps proof.
         #[arg(long)]
         ots_proof: PathBuf,
+        /// Bitcoin Core JSON-RPC endpoint; no endpoint is assumed by default.
+        #[arg(long)]
+        rpc_url: String,
+        /// Bitcoin Core cookie file. Without this, credentials come from
+        /// VESTRIX_BITCOIN_RPC_USER and VESTRIX_BITCOIN_RPC_PASSWORD.
+        #[arg(long)]
+        rpc_cookie: Option<PathBuf>,
     },
 }
 
@@ -65,18 +73,36 @@ fn run(cli: Cli) -> Result<String, String> {
                 report.records
             ))
         }
-        Command::Anchor { chain, ots_proof } => {
-            anchor::verify_anchor(&chain, &ots_proof).map_err(|error| {
-                format!(
-                    "anchor check incomplete: {error}\n\
-                     IMPORTANT: this non-zero exit does NOT mean the chain is corrupt or tampered. \
-                     The `chain` subcommand is the chain-integrity verdict. Full anchor verification \
-                     requires an independently trusted Bitcoin Core node and a mature Rust OTS proof-verification crate."
-                )
-            })?;
-            Ok("anchor valid".to_owned())
+        Command::Anchor {
+            chain,
+            ots_proof,
+            rpc_url,
+            rpc_cookie,
+        } => {
+            let client = rpc_client(&rpc_url, rpc_cookie)?;
+            let report = anchor::verify_anchor(&chain, &ots_proof, &client)
+                .map_err(|error| error.to_string())?;
+            Ok(format!(
+                "anchor valid: chain tip seq {}; Bitcoin block {} at height {}; {} confirmations",
+                report.seq, report.block_hash, report.height, report.confirmations
+            ))
         }
     }
+}
+
+fn rpc_client(url: &str, cookie: Option<PathBuf>) -> Result<Client, String> {
+    let auth = if let Some(path) = cookie {
+        Auth::CookieFile(path)
+    } else {
+        let user = std::env::var("VESTRIX_BITCOIN_RPC_USER").map_err(|_| {
+            "RPC configuration error: pass --rpc-cookie or set VESTRIX_BITCOIN_RPC_USER and VESTRIX_BITCOIN_RPC_PASSWORD".to_owned()
+        })?;
+        let password = std::env::var("VESTRIX_BITCOIN_RPC_PASSWORD").map_err(|_| {
+            "RPC configuration error: pass --rpc-cookie or set VESTRIX_BITCOIN_RPC_USER and VESTRIX_BITCOIN_RPC_PASSWORD".to_owned()
+        })?;
+        Auth::UserPass(user, password)
+    };
+    Client::new_with_auth(url, auth).map_err(|error| format!("RPC configuration error: {error}"))
 }
 
 fn read_public_key(path: &Path) -> Result<[u8; 32], String> {
