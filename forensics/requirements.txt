@@ -1,2 +1,4 @@
 cryptography==49.0.0
 filelock==3.29.7
+opentimestamps-client==0.7.2
+opentimestamps>=0.4.0,<0.5.0
